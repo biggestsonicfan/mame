@@ -87,6 +87,7 @@
 #include "machine/mb8421.h"
 #include "machine/msm6253.h"
 #include "machine/nvram.h"
+#include "imagedev/bitbngr.h"
 #include "sound/ymopn.h"
 
 #include "speaker.h"
@@ -350,6 +351,24 @@ void model2b_state::machine_reset()
 	m_copro_adsp->set_flag_input(0, 1);
 	// clear FIFOOUT buffer full flag on SHARC
 	m_copro_adsp->set_flag_input(1, 0);
+
+	// M2-X11: hold the real geometrizer SHARC (cpres2) halted until the game boots it.
+	m_geo_adsp->set_input_line(INPUT_LINE_HALT, ASSERT_LINE);
+	m_geo_sharc_booted = false;
+	m_geo_raster_cap.clear();
+	// M2-X11: env toggle to disable the HLE geometrizer (prove the screen 3D is HLE vs the real SHARC).
+	m_hle_geo_off = (getenv("M2_HLE_GEO_OFF") != nullptr);
+
+	// M2-X11: cache the "polygons" (Models) ROM base for cpres2's OBJECT mesh fetch (geo_poly_r). The
+	// region is byte-organized; the HLE reinterprets it as u32* (polygon_rom[oba & mask]).
+	memory_region *poly = memregion("polygons");
+	if (poly)
+	{
+		m_geo_polyrom = (const u32 *)poly->base();
+		m_geo_polyrom_mask = (poly->bytes() / 4) - 1;
+	}
+	if (m_geo_vwork.empty())                 // M2-X11: cpres2 vertex-work backing store (0x420000..0x43ffff)
+		m_geo_vwork.resize(0x20000, 0);
 }
 
 void model2c_state::machine_reset()
@@ -690,6 +709,324 @@ void model2b_state::copro_function_port_w(offs_t offset, u32 data)
 	m_copro_fifo_in->push(u32(d));
 }
 
+
+// M2-X11: real GEOMETRIZER SHARC (cpres2) -----------------------------------
+// Runs the actual GEO microcode the game uploads, in parallel with the HLE geo_parse,
+// so we can execute + capture the real cpres2 pipeline (the silicon render path).
+//   i0 = 0x400000  command input  = the shared bufferram (i960 BUFF_RAM 0x900000) display list
+//   i1 = 0x410000  raster output port (screen-space polys) -> captured here
+//   i5 = 0x430000  vertex-work scratch
+//   0x800000       polygon ROM (copro_data)
+// Boot mirrors the COP SHARC: geo_ctl1_w hi-bit edge halts(upload)/runs(boot); firmware
+// halfwords streamed via the geo program FIFO (0x804000 -> geo_prg_w -> external_dma_write);
+// IOP regs (0x840000) wired straight to the device in model2b_crx_mem.
+// Drive the real geometrizer SHARC's FLAG0 = vblank. cpres2's frame loop spins on flag0_in
+// ("frame ready") at PM 0xDA/0xEA/0xEB/0xFB before each frame; the HLE triggers geo_parse on
+// this same vblank edge. Toggling flag0 each vblank satisfies cpres2's boot + per-frame sync.
+void model2b_state::screen_vblank(int state)
+{
+	m_geo_adsp->set_flag_input(0, state ? 1 : 0);
+	if (state)   // vblank start = frame boundary: roll the per-frame raster log + reset the cmd FIFO
+	{
+		if (m_geo_frame_geom > 4)   // only announce frames that actually emitted geometry
+			logerror("GEOFRAME %u geom=%u\n", m_geo_frame, m_geo_frame_geom);
+		// M2-X11 bank-coherence diag: the cube flicker is geom 708 (clean 3 cubes) <-> ~4100 (garbage).
+		// For the first 60 geometry frames, log this frame's read_start, WHERE cpres2 stopped reading
+		// (m_geo_cmd_ptr, still valid — reset is below), how many words it read, and the read bank's first
+		// words. CLEAN vs GARBAGE comparison tells us: (a) does read_start point to a DIFFERENT/stale bank
+		// on garbage frames (first words differ), or (b) same bank but cpres2 read PAST a clobbered END
+		// (read-count balloons from ~708 to ~4100 with the same read_start)?
+		{
+			static u32 s_bankdiag_n = 0;
+			// skip the boot/texture-upload phase (first ~200 frames) so we capture the CUBE-render flicker.
+			if (m_geo_frame > 200u && m_geo_frame_geom > 4 && s_bankdiag_n < 80)
+			{
+				u32 rs = (m_geo_read_start_address & 0x1ffff) >> 2;   // read_start word index
+				u32 stopped = m_geo_cmd_ptr & 0x7fff;
+				logerror("GEOBANK f=%u geom=%u %s rs=%05X ws=%05X stop=%05X read=%d : %08X %08X %08X %08X %08X %08X\n",
+					m_geo_frame, m_geo_frame_geom, (m_geo_frame_geom > 1000u) ? "GARBAGE" : "clean  ",
+					m_geo_read_start_address, m_geo_write_start_address, m_geo_cmd_ptr, (int)(stopped - rs),
+					m_bufferram[rs & 0x7fff], m_bufferram[(rs + 1) & 0x7fff], m_bufferram[(rs + 2) & 0x7fff],
+					m_bufferram[(rs + 3) & 0x7fff], m_bufferram[(rs + 4) & 0x7fff], m_bufferram[(rs + 5) & 0x7fff]);
+				s_bankdiag_n++;
+			}
+		}
+		// M2-X11 opcode census dump: every 1024 frames, print the cumulative per-opcode dispatch counts.
+		if ((m_geo_frame & 0x3ffu) == 0u && m_geo_op_dumped < 12)
+		{
+			logerror("GEOOPCENSUS f=%u: 0:%u 1OBJ:%u 2DIR:%u 3:%u 4TEX:%u 5VLD:%u 6:%u 7:%u 8:%u Bmtx:%u Fend:%u\n",
+				m_geo_frame, m_geo_op_count[0], m_geo_op_count[1], m_geo_op_count[2], m_geo_op_count[3],
+				m_geo_op_count[4], m_geo_op_count[5], m_geo_op_count[6], m_geo_op_count[7],
+				m_geo_op_count[8], m_geo_op_count[0xb], m_geo_op_count[0xf]);
+			m_geo_op_dumped++;
+		}
+		m_geo_frame++;
+		m_geo_raster_log_n = 0;
+		m_geo_frame_geom = 0;
+		// reset cpres2's command-FIFO read pointer to the committed list (read_start) for the new frame
+		m_geo_cmd_ptr = (m_geo_read_start_address & 0x1ffff) >> 2;
+		// M2-X11 diag: log read_start + the first words of the bank cpres2 will read this frame. SAMPLE
+		// every 256th frame across the WHOLE run (the first 60 frames are only STF's boot; the demo
+		// fight is ~7000 frames in) so we actually capture the fighter geometry.
+		if ((m_geo_frame & 0xffu) == 0u && m_geo_vbl_log_n < 90)
+		{
+			// M2-X11 diag: where is the geo SHARC right now? If it's parked at one PC every vblank it's
+			// SPINNING on a handshake (waiting on a flag/msgr the i960 never set); if it walks, it's running.
+			logerror("GEOPC f=%u pc=%05X halted=%d\n", m_geo_frame,
+					 (u32)m_geo_adsp->state_int(STATE_GENPC),
+					 (int)(m_geo_adsp->suspended(SUSPEND_REASON_HALT) ? 1 : 0));
+			u32 b = m_geo_cmd_ptr & 0x7fff;
+			logerror("GEOVBL f=%u rs=%05X waddr=%05X : %08X %08X %08X %08X %08X %08X %08X %08X\n",
+					 m_geo_frame, m_geo_read_start_address, m_geo_write_start_address,
+					 m_bufferram[b], m_bufferram[(b+1)&0x7fff], m_bufferram[(b+2)&0x7fff],
+					 m_bufferram[(b+3)&0x7fff], m_bufferram[(b+4)&0x7fff], m_bufferram[(b+5)&0x7fff],
+					 m_bufferram[(b+6)&0x7fff], m_bufferram[(b+7)&0x7fff]);
+			// scan ALL of bufferram for OBJECT cmds (0x00800101) + JUMP words to see WHERE the objects
+			// are vs where cpres2 reads (read_start). Also note the first jump word in cpres2's bank.
+			u32 nobj = 0, firstobj = 0xffffffff, njump = 0, firstjump = 0xffffffff;
+			u32 npoly = 0, ndir = 0, ntexup = 0;
+			for (u32 i = 0; i < 0x8000; i++)
+			{
+				u32 w = m_bufferram[i];
+				if (w == 0x00800101u) { nobj++; if (firstobj == 0xffffffffu) firstobj = i; }
+				else if (w == 0x0A801515u) npoly++;      // POLYGON (pre-transformed polys)
+				else if (w == 0x01000202u) ndir++;       // DIRECT
+				else if (w == 0x02800505u) ntexup++;     // TEXUP
+			}
+			logerror("GEOSCAN2 f=%u rs=%05X obj=%u poly=%u dir=%u texup=%u\n",
+					 m_geo_frame, m_geo_read_start_address, nobj, npoly, ndir, ntexup);
+			// scan cpres2's own bank (0x2000 words from its read ptr) for a JUMP-looking opcode
+			for (u32 i = 0; i < 0x2000; i++)
+			{
+				u32 w = m_bufferram[(b + i) & 0x7fff];
+				if ((w & 0x80000000u) && (w & 0x7fffffffu) < 0x20000u) { njump++; if (firstjump==0xffffffffu){ firstjump=i; } }
+			}
+			logerror("GEOSCAN f=%u rs=%05X nobj=%u firstobj@%05X(off%05X) bankjumps=%u firstjump@%05X=%08X\n",
+					 m_geo_frame, m_geo_read_start_address, nobj, firstobj, firstobj << 2,
+					 njump, firstjump, firstjump==0xffffffffu?0:m_bufferram[(b+firstjump)&0x7fff]);
+			m_geo_vbl_log_n++;
+		}
+	}
+	model2_state::screen_vblank(state);
+}
+
+void model2b_state::geo_sharc_map(address_map &map)
+{
+	// cpres2 reads the WHOLE display list (commands + operands) through a FIXED port at i0=0x400000
+	// (m0=0, so the SHARC index never advances). The GEO HARDWARE auto-advances a read pointer per
+	// access, FIFO-style — exactly like the COP's command FIFO at its own 0x400000. So this is a
+	// read handler that pops successive bufferram words, NOT a flat RAM share (which made cpres2
+	// re-read the same word forever).
+	map(0x00400000, 0x00407fff).r(FUNC(model2b_state::geo_cmd_r));         // i0: display-list FIFO port
+	map(0x00410000, 0x0041ffff).rw(FUNC(model2b_state::geo_raster_r),
+									FUNC(model2b_state::geo_raster_w));        // i1: raster output port
+	map(0x00420000, 0x0043ffff).rw(FUNC(model2b_state::geo_vwork_r),
+									FUNC(model2b_state::geo_vwork_w));        // i5: vertex-work + COP stream port
+	map(0x00800000, 0x00ffffff).r(FUNC(model2b_state::geo_poly_r));        // OBJECT mesh fetch -> polygon ROM
+	// M2-X11: CRASH-SAFE catch-all for the high range. The OBJECT handler (PM 0x20173) fetches the
+	// mesh from oba+0xff030100 (~0x1F000000+ / 0xFF000000+), which we don't map yet — without this
+	// the unmapped access kills MAME the instant a real OBJECT is dispatched. Return 0 (degenerate
+	// mesh) instead of crashing so we can confirm the OBJECT path + iterate the real polygon-ROM map.
+	// (Range starts above all our regions + the SHARC internal memory at 0x20000-0x3ffff.)
+	map(0x01000000, 0xffffffff).r(FUNC(model2b_state::geo_himem_r));
+}
+
+// M2-X11: catch + LOG the OBJECT handler's mesh-fetch reads so we can calibrate the polygon-ROM
+// mapping (offset is the SHARC word index within the 0x01000000.. range; correlate vs the list's
+// oba values, which select polygon_rom via oba bit23 = polygon_rom[oba & mask] in the HLE). Returns
+// 0 for now (degenerate mesh, no crash).
+// cpres2's OBJECT handler fetches the per-object mesh from oba (bit23 set = polygon ROM). The HLE does
+// polygon_rom[oba & mask]; cpres2 reads it directly in its data space at ~oba, mapped here at 0x800000..
+// (offset is the word index from 0x800000, so the access address = 0x800000 + offset = oba). Index the
+// "polygons" ROM the same way the HLE does (mask to the ROM size).
+u32 model2b_state::geo_poly_r(offs_t offset)
+{
+	if (!m_geo_polyrom) return 0;
+	u32 addr = 0x800000u + offset;
+	return m_geo_polyrom[addr & m_geo_polyrom_mask];
+}
+
+u32 model2b_state::geo_himem_r(offs_t offset)
+{
+	if (m_geo_himem_log_n < 64)
+	{
+		logerror("GEOHIMEM %03u off=%08X\n", m_geo_himem_log_n, (u32)offset);
+		m_geo_himem_log_n++;
+	}
+	// The OBJECT handler's polygon-ROM mesh path (PM 0x6D4) reads at i5 = oba + 0xff030100. Map it to
+	// the "polygons" ROM, HLE-style polygon_rom[oba & mask] (oba = addr - 0xff030100). This renders the
+	// STATIC objects (Object 1 / poly-ROM meshes); dynamic fighters use the vert-work/COP path instead.
+	if (m_geo_polyrom)
+	{
+		u32 addr = 0x01000000u + offset;
+		u32 oba  = addr - 0xff030100u;
+		return m_geo_polyrom[oba & m_geo_polyrom_mask];
+	}
+	return 0;
+}
+
+// M2-X11: cpres2 OBJECT vertex streaming port (i5 region 0x420000..0x43ffff).
+// The OBJECT handler (path b) never resets i5 inside the loop: it WRITES an incrementing mesh index
+// (oba+counter, via dm(i5,m1)=r15 at 0x430000) and READS the vertex back (dm(i5,m5) at 0x430001),
+// with m1=+1/m5=-1 so i5 just oscillates 0x430000<->0x430001. On silicon the COP answers each request
+// with the next model-space mesh vertex; cpres2 then applies the object matrix itself. We synthesize
+// the COP's answer straight from the polygon ROM at the requested index. Everything else in the region
+// is plain RAM (op5 vert-load fills 0x420000+). offset is relative to the 0x420000 map base.
+u32 model2b_state::geo_vwork_r(offs_t offset)
+{
+	u32 val = (offset == 0x10001u && m_geo_polyrom)   // 0x430001 = stream response: next mesh vertex word
+				? m_geo_polyrom[m_geo_vreq & m_geo_polyrom_mask]
+				: ((offset < m_geo_vwork.size()) ? m_geo_vwork[offset] : 0);
+	// M2-X11 diag: trace EVERY vert-work read (offset + PC + value), so we can see whether the quad's
+	// 4th vertex reads the response port 0x10001 (polygon ROM) or some other offset (stale backing RAM).
+	if (m_geo_vstream_log_n < 300)
+	{
+		u32 pc = (u32)m_geo_adsp->state_int(STATE_GENPC);
+		// Periodically dump cpres2's STORED transform matrix + focal from its internal DM (block 1).
+		// The MATRIX handler @0xB66 stores 12 words rotated (elems 3..B then 0,1,2) to 0x30020; focal
+		// 0xc/0xd come from opcode 9. Compare vs the HLE geo->matrix to test the "matrix state" theory.
+		if ((m_geo_vstream_log_n % 40u) == 0u)
+		{
+			address_space &ds = m_geo_adsp->space(AS_DATA);
+			logerror("GEOMTX @oba=%08X m[0..D]= %08X %08X %08X | %08X %08X %08X | %08X %08X %08X | %08X %08X %08X || focal_c=%08X focal_d=%08X\n",
+				m_geo_vreq,
+				ds.read_dword(0x30020), ds.read_dword(0x30021), ds.read_dword(0x30022),
+				ds.read_dword(0x30023), ds.read_dword(0x30024), ds.read_dword(0x30025),
+				ds.read_dword(0x30026), ds.read_dword(0x30027), ds.read_dword(0x30028),
+				ds.read_dword(0x30029), ds.read_dword(0x3002a), ds.read_dword(0x3002b),
+				ds.read_dword(0x3002c), ds.read_dword(0x3002d));
+		}
+		logerror("GEOSTREAM %03u pc=%05X off=%05X req=%08X -> %08X%s\n", m_geo_vstream_log_n,
+				 pc, offset, m_geo_vreq, val, (offset != 0x10001u) ? "  <OFF-PORT>" : (val == 0 ? "  <ZERO>" : ""));
+		m_geo_vstream_log_n++;
+	}
+	return val;
+}
+
+void model2b_state::geo_vwork_w(offs_t offset, u32 data)
+{
+	if (offset == 0x10000u)                        // 0x430000 = stream request: the mesh index (oba+counter)
+		m_geo_vreq = data;
+	if (offset < m_geo_vwork.size())
+		m_geo_vwork[offset] = data;
+}
+
+u32 model2b_state::geo_cmd_r(offs_t offset)
+{
+	// FIFO pop: return the next display-list word, auto-advance the pointer. Reset to read_start
+	// at each frame boundary (screen_vblank). offset is ignored — cpres2 always hits 0x400000.
+	u32 v = m_bufferram[m_geo_cmd_ptr & 0x7fff];
+	// M2-X11: follow JUMP opcodes (bit31) like the HLE geo_parse — but ONLY at the firmware's
+	// COMMAND-read instructions (PM 0x2010A / 0x20121, the only dm(i0) reads in the main loop
+	// 0x104..0x122). NOT during operand reads at handler PCs — that's how the HLE disambiguates a
+	// jump from a negative-float vertex operand (both have bit31). The object list is spread across
+	// the 4 banks via these jumps; cpres2's FIFO must follow them to reach the geometry.
+	{
+		u32 pc = (u32)m_geo_adsp->state_int(STATE_GENPC);
+		if (pc >= 0x20104u && pc <= 0x20122u)
+			for (int g = 0; g < 16 && (v & 0x80000000u); g++)
+			{
+				m_geo_cmd_ptr = (v & 0x1ffffu) >> 2;
+				v = m_bufferram[m_geo_cmd_ptr & 0x7fff];
+			}
+	}
+	// M2-X11 opcode census: at the main-loop command read (PC 0x2010A), tally the dispatched opcode
+	// (cmd>>23)&0x1f. Tells us which handlers actually run — esp. opcode 5 (vert-load fills vert-work)
+	// and opcode 2 (DIRECT screen-space), the candidate real-geometry paths.
+	{
+		u32 pc = (u32)m_geo_adsp->state_int(STATE_GENPC);
+		if (pc == 0x2010Au && !(v & 0x80000000u))
+			m_geo_op_count[(v >> 23) & 0x1f]++;
+	}
+	// M2-X11 diag: when cpres2 reads an OBJECT command (0x00800101), log the PC. If PC is the main
+	// command loop (~0x2010A/0x20121) it's being DISPATCHED; if it's mid-handler it's swallowed as data.
+	if (v == 0x00800101u && m_geo_obj_log_n < 48)
+	{
+		logerror("GEOOBJREAD %03u ptr=%05X pc=%05X\n", m_geo_obj_log_n, m_geo_cmd_ptr,
+				 (u32)m_geo_adsp->state_int(STATE_GENPC));
+		m_geo_obj_log_n++;
+	}
+	// M2-X11 diag: trace the raw words cpres2 reads for the first few MATRIX (0x05800B0B) + OBJECT
+	// (0x00800101) records, to see if the matrix / inline mesh verts are wrong-scale at the INPUT.
+	if (m_geo_trace_n > 0) { logerror("GEOTRACE     %08X\n", v); m_geo_trace_n--; }
+	if ((v == 0x05800B0Bu || v == 0x00800101u) && m_geo_trace_cnt < 8)
+	{
+		logerror("GEOTRACE CMD %08X @ptr=%05X\n", v, m_geo_cmd_ptr);
+		m_geo_trace_n = 18;
+		m_geo_trace_cnt++;
+	}
+	m_geo_cmd_ptr++;
+	return v;
+}
+
+void model2b_state::geo_raster_w(offs_t offset, u32 data)
+{
+	// cpres2 streams screen-space polygons to i1 (0x410000). Capture in emission order.
+	if (m_geo_raster_cap.size() < (1u << 20))
+		m_geo_raster_cap.push_back(data);
+	// M2-X11: when the HLE is OFF, drive MAME's rasterizer from the REAL cpres2 raster stream so the
+	// SCREEN shows what the actual geometry microcode rendered (the definitive SHARC-not-HLE proof).
+	if (m_hle_geo_off)
+		geo_sharc_raster_push(data);
+	// M2-X11 instrumentation: PER-FRAME rolling log (reset each vblank, tagged with the frame number)
+	// so we can grab an actual 3D-attract frame, not the boot phase. Skip the 0xFF000000 terminator
+	// spam; count non-terminator emits per frame (m_geo_frame_geom) to flag geometry frames.
+	if (data != 0xFF000000u)
+	{
+		m_geo_frame_geom++;
+		if (m_geo_raster_log_n < 300)
+		{
+			// M2-X11 diag: log the cpres2 PC that emitted each i1 word -> which HANDLER emits it.
+			// An emit from the OBJECT handler (~0x20179) = cpres2 IS rendering a polygon.
+			logerror("GEORAST f=%u %04u pc=%05X %08X\n", m_geo_frame, m_geo_raster_log_n,
+					 (u32)m_geo_adsp->state_int(STATE_GENPC), data);
+			m_geo_raster_log_n++;
+		}
+	}
+}
+
+u32 model2b_state::geo_raster_r(offs_t offset)
+{
+	return 0;
+}
+
+void model2b_state::geo_ctl1_w(u32 data)
+{
+	// hi-bit edge = upload-start / boot, mirroring copro_ctl1_w for the COP SHARC.
+	if ((data ^ m_geoctl) == 0x80000000)
+	{
+		if (data & 0x80000000)
+		{
+			logerror("Start geo SHARC upload\n");
+			m_geocnt = 0;
+			m_geo_adsp->set_input_line(INPUT_LINE_HALT, ASSERT_LINE);   // halt for upload
+		}
+		else
+		{
+			logerror("Boot geo SHARC, %d dwords\n", m_geocnt);
+			m_geo_raster_cap.clear();
+			m_geo_raster_log_n = 0;
+			m_geo_sharc_booted = true;
+			m_geo_adsp->set_input_line(INPUT_LINE_HALT, CLEAR_LINE);    // run cpres2
+		}
+	}
+
+	m_geoctl = data;
+}
+
+void model2b_state::geo_prg_w(u32 data)
+{
+	if (m_geoctl & 0x80000000)
+	{
+		// firmware upload: stream halfwords to the SHARC host-boot DMA (like copro_fifo_w).
+		m_geo_adsp->external_dma_write(m_geocnt, data & 0xffff);
+		m_geocnt++;
+	}
+	else
+	{
+		push_geo_data(data);   // display-list push (unchanged HLE path also consumes bufferram)
+	}
+}
 
 
 // Coprocessor - TGPx4
@@ -1068,6 +1405,12 @@ void model2_state::model2_base_mem(address_map &map)
 	// "extra" data
 	map(0x06000000, 0x06ffffff).rom().region("main_data", 0x1000000).flags(i960_cpu_device::BURST);
 
+	// m2-x11: extended writable RAM window (8 MB) in the otherwise-unmapped
+	// 0x04000000 hole. Lets a large (kdrive/Xorg-class) X server keep its heap /
+	// pixmaps / shadow framebuffer out of the 1 MB workram. Emulator/homebrew
+	// liberty: stock Model 2b has nothing mapped here, so no game is affected.
+	map(0x04000000, 0x047fffff).ram().flags(i960_cpu_device::BURST);
+
 	map(0x10000000, 0x101fffff).rw(FUNC(model2_state::render_mode_r), FUNC(model2_state::render_mode_w));
 //  map(0x10200000, 0x103fffff) renderer status register
 	map(0x10400000, 0x105fffff).r(FUNC(model2_state::polygon_count_r));
@@ -1385,7 +1728,8 @@ void model2b_state::model2b_crx_mem(address_map &map)
 
 	map(0x00804000, 0x00807fff).rw(FUNC(model2b_state::geo_prg_r), FUNC(model2b_state::geo_prg_w));
 	//map(0x00804000, 0x00807fff).rw(FUNC(model2b_state::geo_sharc_fifo_r), FUNC(model2b_state::geo_sharc_fifo_w));
-	//map(0x00840000, 0x00840fff).w(FUNC(model2b_state::geo_sharc_iop_w));
+	// M2-X11: GEO SHARC (cpres2) IOP regs -> the real device (mirrors the COP's 0x8c0000 wiring).
+	map(0x00840000, 0x00840fff).w(m_geo_adsp, FUNC(adsp21062_device::external_iop_write));
 
 	map(0x00880000, 0x00883fff).w(FUNC(model2b_state::copro_function_port_w));
 	map(0x00884000, 0x00887fff).rw(FUNC(model2b_state::copro_fifo_r), FUNC(model2b_state::copro_fifo_w));
@@ -2425,7 +2769,9 @@ void model2_state::screen_vblank(int state)
 	m_framenum = m_screen->frame_number();
 
 	// if 60 Hz mode or frame number is even, trigger geometrizer to start new frame
-	if ((m_videocontrol & 1) == 0 || (m_framenum & 1) == 0)
+	// M2-X11: m_hle_geo_off (env M2_HLE_GEO_OFF) disables the HLE geometrizer so we can prove the
+	// on-screen 3D came from geo_parse (HLE), while the REAL cpres2 SHARC keeps running + emitting.
+	if (((m_videocontrol & 1) == 0 || (m_framenum & 1) == 0) && !m_hle_geo_off)
 		geo_parse();
 
 	const u32 line = 1 << 0;
@@ -2842,9 +3188,12 @@ void model2b_state::model2b(machine_config &config)
 	m_copro_adsp->set_addrmap(AS_DATA, &model2b_state::copro_sharc_map);
 	m_copro_adsp->enable_recompiler();
 
-	//ADSP21062(config, m_dsp2, 40000000);
-	//m_dsp2->set_boot_mode(adsp21062_device::BOOT_MODE_HOST);
-	//m_dsp2->set_addrmap(AS_DATA, &model2b_state::geo_sharc_map);
+	// M2-X11: the REAL geometrizer SHARC (cpres2) — runs the actual GEO microcode the game
+	// uploads, in parallel with the HLE geo_parse. Interpreter (no DRC) while we validate it.
+	ADSP21062(config, m_geo_adsp, 32_MHz_XTAL);
+	m_geo_adsp->set_boot_mode(adsp21062_device::BOOT_MODE_HOST);
+	m_geo_adsp->set_addrmap(AS_DATA, &model2b_state::geo_sharc_map);
+	m_geo_adsp->set_m2_xtrace(getenv("M2_XTRACE") != nullptr);   // M2-X11: transform single-step trace
 
 	config.set_maximum_quantum(attotime::from_hz(18000));
 
@@ -2862,6 +3211,12 @@ void model2b_state::model2b(machine_config &config)
 	io.in_pg_callback().set_ioport("SW");
 	io.out_pe_callback().set([this] (u8 data) { m_billboard->write(data); });
 	io.out_pf_callback().set(FUNC(model2_state::lamp_output_w));
+
+	/* M2-X11 serial tap: route the 315-5649 data channel (board->host TXD2) to a
+	 * bitbanger the host can read. Attach at runtime: -serout <file> or
+	 * -serout socket.127.0.0.1:<port>. */
+	BITBANGER(config, "serout", 0);
+	io.serial_ch2_wr_callback().set("serout", FUNC(bitbanger_device::output));
 
 	model2_timers(config);
 	model2_screen(config);

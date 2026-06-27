@@ -357,14 +357,21 @@ uint32_t adsp21062_device::iop_r(offs_t offset)
 	switch (offset)
 	{
 		case 0x00: return 0;    // System configuration
+		case 0x01: return 0;    // M2-X11: VIRPT (vector interrupt register) — no pending MP vector IRQ modeled
+
+		case 0x08: case 0x09: case 0x0a: case 0x0b:   // M2-X11: Message Registers MSGR0..7
+		case 0x0c: case 0x0d: case 0x0e: case 0x0f:
+			return m_core->msgr[offset - 0x08];
 
 		case 0x37:      // DMA status
 		{
 			return m_core->dma_status;
 		}
 		default:
+		// M2-X11: see iop_w — the real Model 2 firmware touches IOP control registers stock MAME never
+		// implemented. LOG + return 0 instead of a fatalerror so the real microcode keeps running.
 		if (!machine().side_effects_disabled())
-			throw emu_fatalerror("sharc_iop_r: Unimplemented IOP reg %02X at %08X\n", offset, m_core->pc);
+			logerror("sharc_iop_r: unimplemented IOP reg %02X at %08X -> 0\n", offset, m_core->pc);
 
 		return 0;
 	}
@@ -375,7 +382,13 @@ void adsp21062_device::iop_w(offs_t offset, uint32_t data)
 	switch (offset)
 	{
 		case 0x00: m_core->syscon = data; break;
+		case 0x01: break;       // M2-X11: VIRPT (vector interrupt register) — multiprocessor inter-SHARC
+		                        // vector IRQ. The Model 2 GEO microcode writes it (e.g. 0 at init, PC ~0x203A0);
+		                        // no MP vector IRQ is modeled here so ignore the write. If a real COP<->GEO
+		                        // vector interrupt is ever required, implement the MP delivery here.
 		case 0x02: break;       // External Memory Wait State Configuration
+		case 0x03: break;       // M2-X11: SYSTAT (system status) — GEO microcode clears it at init
+		                        // (0 @ PC ~0x2039F), part of the same IOP control block as VIRPT; benign.
 		case 0x04: // External port DMA buffer 0
 		{
 			external_dma_write(m_core->extdma_shift, data);
@@ -385,14 +398,9 @@ void adsp21062_device::iop_w(offs_t offset, uint32_t data)
 			break;
 		}
 
-		case 0x08: break;       // Message Register 0
-		case 0x09: break;       // Message Register 1
-		case 0x0a: break;       // Message Register 2
-		case 0x0b: break;       // Message Register 3
-		case 0x0c: break;       // Message Register 4
-		case 0x0d: break;       // Message Register 5
-		case 0x0e: break;       // Message Register 6
-		case 0x0f: break;       // Message Register 7
+		case 0x08: case 0x09: case 0x0a: case 0x0b:   // M2-X11: Message Registers MSGR0..7 (store)
+		case 0x0c: case 0x0d: case 0x0e: case 0x0f:
+			m_core->msgr[offset - 0x08] = data; break;
 
 		case 0x14: // reserved??? written by Last Bronx
 		case 0x17: break;
@@ -440,7 +448,12 @@ void adsp21062_device::iop_w(offs_t offset, uint32_t data)
 		case 0x4f: m_core->dma[7].ext_count = data; return;
 
 		default:
-			throw emu_fatalerror("sharc_iop_w: Unimplemented IOP reg %02X, %08X at %08X\n", offset, data, m_core->pc);
+			// M2-X11: the real Model 2 GEO/COP firmware initialises a block of IOP control registers that
+			// stock MAME never implemented (other Model 2 games HLE'd the geometry, so their firmware never
+			// ran). These init writes are benign config/clear (data usually 0); LOG + IGNORE instead of a
+			// fatalerror so the real microcode keeps running. (Was fatalerror; turned into a soft stub.)
+			logerror("sharc_iop_w: ignoring unimplemented IOP reg %02X = %08X at %08X\n", offset, data, m_core->pc);
+			break;
 	}
 }
 
@@ -1282,6 +1295,22 @@ void adsp21062_device::execute_run()
 			debugger_instruction_hook(m_core->pc);
 
 			m_core->opcode = m_program.read_qword(m_core->pc);
+
+			// M2-X11: single-step trace of cpres2's OBJECT strip-loop vertex transform (geo SHARC only),
+			// to find which instruction makes the quad 4th vertex blow up. Logs reg state ENTERING each
+			// instruction in the transform PC range. Gated by env M2_XTRACE + the geo_adsp tag.
+			if (m_m2_xtrace && m_core->pc >= 0x20383 && m_core->pc <= 0x203aa)
+			{
+				static int s_xn = 0;
+				if (s_xn < 360)
+				{
+					logerror("XTRACE pc=%05X op=%012llX r0=%08X r1=%08X r2=%08X r3=%08X r4=%08X r6=%08X r7=%08X r8=%08X r9=%08X r10=%08X r12=%08X\n",
+						(u32)m_core->pc, (unsigned long long)m_core->opcode,
+						m_core->r[0].r, m_core->r[1].r, m_core->r[2].r, m_core->r[3].r, m_core->r[4].r,
+						m_core->r[6].r, m_core->r[7].r, m_core->r[8].r, m_core->r[9].r, m_core->r[10].r, m_core->r[12].r);
+					s_xn++;
+				}
+			}
 
 			// handle looping
 			if (!(m_core->stky & LSEM) && (m_core->pc == m_core->laddr.addr))

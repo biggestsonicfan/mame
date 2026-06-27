@@ -367,6 +367,48 @@ void model2_state::model2_3d_process_polygon(raster_state *raster, u32 attr)
 		raster->command_buffer[16] = raster->command_buffer[13];
 	}
 
+	// M2-X11 triangle hunt: log the actual SCREEN coords of every finalized polygon and flag the ones
+	// that land on the visible 496x384 raster. Runs for BOTH the real cpres2 (M2_HLE_GEO_OFF) AND the
+	// HLE geo_parse, so we can diff whether the HLE produces the same quad-vertex collapse from this mesh.
+	{
+		static int s_tri_log_n = 0;
+		const float X0 = object.v[0].x, Y0 = object.v[0].y;
+		const float X1 = object.v[1].x, Y1 = object.v[1].y;
+		const float X2 = object.v[2].x, Y2 = object.v[2].y;
+		auto onscr = [](float x, float y){ return x > -32.f && x < 528.f && y > -32.f && y < 416.f; };
+		// REAL geometry = all three verts on-screen AND not the degenerate (78400,0)/(0,0) triangle.
+		bool all_on  = onscr(X0,Y0) && onscr(X1,Y1) && onscr(X2,Y2);
+		bool degen   = (X1==0.f && Y1==0.f && X2==0.f && Y2==0.f);   // the empty-COP triangle
+		if (all_on && !degen && s_tri_log_n < 160)
+		{
+			logerror("GEOTRI %s tpa=%06X tha=%06X v0=(%.0f,%.0f) v1=(%.0f,%.0f) v2=(%.0f,%.0f) z=%.3f attr=%08X\n",
+				NumVerts == 4 ? "Q" : "T",
+				raster->command_buffer[0] & 0xffffff, raster->command_buffer[1] & 0xffffff,
+				X0, Y0, X1, Y1, X2, Y2, object.v[0].pz, attr);
+			s_tri_log_n++;
+		}
+		// M2-X11: a COLLAPSING poly = some verts real & on-screen, but >=1 OTHER vert sits exactly at the
+		// origin (the camera-center fan). Dump the raw emitted command_buffer so we can see whether cpres2
+		// emitted zeros (transform of a zero mesh vert) or the strip relink moved the wrong slot.
+		static int s_col_log_n = 0;
+		const float X3 = (NumVerts == 4) ? object.v[3].x : 0.f, Y3 = (NumVerts == 4) ? object.v[3].y : 0.f;
+		int real_n = (onscr(X0,Y0)&&!(X0==0&&Y0==0)) + (onscr(X1,Y1)&&!(X1==0&&Y1==0))
+				   + (onscr(X2,Y2)&&!(X2==0&&Y2==0)) + (NumVerts==4 && onscr(X3,Y3)&&!(X3==0&&Y3==0));
+		int zero_n = (X0==0&&Y0==0)+(X1==0&&Y1==0)+(X2==0&&Y2==0)+(NumVerts==4&&X3==0&&Y3==0);
+		if (real_n >= 2 && zero_n >= 1 && s_col_log_n < 40)
+		{
+			logerror("GEOCOLLAPSE %s attr=%08X link=%d v=(%.0f,%.0f)(%.0f,%.0f)(%.0f,%.0f)(%.0f,%.0f) cb[2..16]="
+				"%08X %08X %08X %08X %08X %08X | %08X %08X %08X | %08X %08X %08X %08X %08X %08X\n",
+				NumVerts == 4 ? "Q" : "T", attr, (attr >> 8) & 3, X0, Y0, X1, Y1, X2, Y2, X3, Y3,
+				raster->command_buffer[2], raster->command_buffer[3], raster->command_buffer[4],
+				raster->command_buffer[5], raster->command_buffer[6], raster->command_buffer[7],
+				raster->command_buffer[8], raster->command_buffer[9], raster->command_buffer[10],
+				raster->command_buffer[11], raster->command_buffer[12], raster->command_buffer[13],
+				raster->command_buffer[14], raster->command_buffer[15], raster->command_buffer[16]);
+			s_col_log_n++;
+		}
+	}
+
 	/* always calculate the min z and max z value */
 	min_z = object.v[0].pz;
 	if (object.v[1].pz < min_z) min_z = object.v[1].pz;
@@ -426,8 +468,21 @@ void model2_state::model2_3d_process_polygon(raster_state *raster, u32 attr)
 	object.luma = (raster->command_buffer[9] >> 15) & 0xff;
 
 	/* set the texture LOD of this polygon */
-	object.texlod = ((raster->command_buffer[10] >> 8) & 0x7f80) - 0x3f80;
-	object.texlod += raster->log_ram[raster->command_buffer[10] & 0x7fff];
+	if (raster->command_buffer[10] == 0)
+	{
+		// M2-X11: the real cpres2 GEO microcode carries NO per-poly LOD word here (it applies LOD
+		// globally via the slot-0x160 DISTANCE register), so command_buffer[10] arrives as 0. The HLE
+		// geo_parse always writes a real per-poly LOD word, so this branch is cpres2-only. Without it,
+		// 0 - 0x3f80 = -16256 forces the COARSEST mip (object 1's texture renders as a blocky downsample
+		// vs the HLE's full-detail LOD0 sheet, 0504.png). Fall back to texlod=0 = natural distance mip
+		// (mml = log2(z)), which matches the HLE's level-0 result for the texquad.
+		object.texlod = 0;
+	}
+	else
+	{
+		object.texlod = ((raster->command_buffer[10] >> 8) & 0x7f80) - 0x3f80;
+		object.texlod += raster->log_ram[raster->command_buffer[10] & 0x7fff];
+	}
 
 	/* determine whether we can cull this polygon */
 	cull = check_culling(raster,attr,min_z,max_z);
@@ -594,6 +649,25 @@ void model2_renderer::model2_3d_render(polygon *poly, const rectangle &cliprect)
 		extra.texx = 32 * ((poly->texheader[2] >> 0) & 0x3f);
 		extra.texy = 32 * ((poly->texheader[2] >> 6) & 0x1f);
 
+		/* DEBUG: log the tiles/colorbase this object uses (first N textured polys) */
+		{
+			static int tcount = 0;
+			if (tcount < 256)
+			{
+				tcount++;
+				FILE *tf = fopen("geo_tiles.log", "a");
+				if (tf)
+				{
+					fprintf(tf, "sheet=%d texx=%u texy=%u w=%u h=%u colorbase=%u lumabase=%u luma=%u texlod=%d renderer=%u th0=%04X th1=%04X th2=%04X th3=%04X\n",
+						(poly->texheader[2] & 0x1000) ? 1 : 0, extra.texx, extra.texy,
+						extra.texwidth, extra.texheight, extra.colorbase, extra.lumabase,
+						(unsigned)poly->luma, (int)poly->texlod, (unsigned)((poly->texheader[0] >> 13) & 3),
+						poly->texheader[0], poly->texheader[1], poly->texheader[2], poly->texheader[3]);
+					fclose(tf);
+				}
+			}
+		}
+
 		// microtexture parameters
 		extra.utex = (poly->texheader[0] >> 12) & 1;
 		extra.utexminlod = (poly->texheader[0] >> 10) & 3;
@@ -693,6 +767,14 @@ void model2_state::render_polygons(bitmap_rgb32 &bitmap, const rectangle &clipre
 	raster_state *raster = m_raster.get();
 	int32_t z;
 
+	// M2-X11: when the REAL cpres2 drives the rasterizer, each frame is already rasterized to destmap at
+	// its FF00000F boundary (geo_sharc_present_frame, vblank-synced). Just present that latched buffer.
+	if (m_hle_geo_off)
+	{
+		copybitmap_trans(bitmap, m_renderer->destmap(), 0, 0, 0, 0, cliprect, 0x00000000);
+		return;
+	}
+
 	// if the geometrizer hasn't presented a new frame, just copy the previous frame and bail
 	if (m_render_done)
 	{
@@ -744,7 +826,11 @@ void model2_state::render_polygons(bitmap_rgb32 &bitmap, const rectangle &clipre
 // pretty sure test mode cuts off DSP framebuffer drawing/clear, according to the manual description too
 void model2_state::draw_framebuffer(bitmap_rgb32 &bitmap, const rectangle &cliprect)
 {
-	u16 *fbvram = &(m_screen->frame_number() & 1 ? m_fbvramB[0] : m_fbvramA[0]);
+	// m2-x11: always display bank A (single-buffered) so a CPU that renders into
+	// fbvramA has a flicker-free, parity-independent TrueColor screen. (Stock
+	// behaviour double-buffers by frame parity; only the rarely-used render-test
+	// framebuffer path is affected.)
+	u16 *fbvram = &m_fbvramA[0];
 	int xoffs = -m_crtc_xoffset;
 	int yoffs = (512 - 384) - m_crtc_yoffset;
 
@@ -766,6 +852,98 @@ void model2_state::draw_framebuffer(bitmap_rgb32 &bitmap, const rectangle &clipr
 }
 
 /* 3D Rasterizer main data input port */
+// M2-X11: feed the REAL cpres2 SHARC's raster-port (i1) stream into MAME's rasterizer, so the
+// SCREEN is drawn by the actual geometry microcode instead of the HLE geo_parse. cpres2's stream
+// is the raw hardware-rasterizer format model2_3d_push already understands (FF0000_0N command +
+// data), with two silicon specifics: 0xFF00000F (clear/swap) = the per-frame boundary, and any
+// FF-command model2_3d_push doesn't implement must be filtered (it would fatalerror).
+// M2-X11: rasterize the cpres2-built poly list to the renderer's destmap. cpres2 is vblank-synced (its
+// frame loop waits on flag0=vblank, so it emits exactly one FF00000F clear/swap per vblank), so this is
+// the correct per-frame latch point: at FF00000F the poly list holds the frame just built. We render it
+// here (once per vblank) and screen_update/render_polygons simply presents destmap — a proper double
+// buffer that decouples the display from cpres2's free-running emit stream (the old code relied on the
+// list NOT being cleared, which froze/accumulated frames).
+void model2_state::geo_sharc_present_frame()
+{
+	raster_state *raster = m_raster.get();
+	if (raster->poly_list_index == 0)        // empty frame: keep the previously presented destmap (no flicker)
+		return;
+
+	const rectangle &cliprect = m_screen->visible_area();
+	m_renderer->destmap().fill(0x00000000, cliprect);
+	m_renderer->fillmap().fill(0x00, cliprect);
+
+	for (int window = raster->cur_window; window >= 0; window--)
+	{
+		for (int z = raster->min_z; z <= raster->max_z; z++)
+		{
+			if (raster->poly_sorted_list[z] != nullptr)
+			{
+				polygon *poly = raster->poly_sorted_list[z];
+				while (poly != nullptr)
+				{
+					if (poly->window == window)
+					{
+						model2_3d_project(poly);
+						// Guard: there is no near-plane clip on the cpres2 path, so a vertex at z~0 projects
+						// to a huge pixel coord (vx/(pz+eps)) that would index outside the bitmap and crash
+						// the scanline rasterizer. Skip any poly with a non-finite / wildly out-of-range vert.
+						bool safe = true;
+						for (int i = 0; i < poly->num_vertices; i++)
+						{
+							const float px = poly->v[i].x, py = poly->v[i].y;
+							if (!std::isfinite(px) || !std::isfinite(py) ||
+								px < -8192.f || px > 8192.f || py < -8192.f || py > 8192.f)
+							{
+								safe = false;
+								break;
+							}
+						}
+						if (safe)
+							m_renderer->model2_3d_render(poly, cliprect);
+					}
+					poly = (polygon *)poly->next;
+				}
+			}
+		}
+	}
+	m_renderer->wait("cpres2 end of frame");
+}
+
+void model2_state::geo_sharc_raster_push(u32 data)
+{
+	raster_state *raster = m_raster.get();
+	// Real cpres2 NEVER ends a polygon strip with an attr&3==0 link word (the convention
+	// model2_3d_push expects to terminate a strip — verified: every cpres2 strip attr is link 1 or 2,
+	// none 0). It instead ends a strip by emitting the next command marker (high byte 0xFF: 0xFF0000xx).
+	// So if a marker arrives while we're still mid-strip, force the strip to end here; otherwise the
+	// marker AND every object after it get swallowed as polygon data, turning command/vertex words into
+	// garbage collapsed polys -> only the first object renders cleanly and the rest "flicker" (the
+	// multi-object cube chaos). cpres2 data words (verts/colour/attr) all have high byte 0x00, so this
+	// never misfires on real geometry.
+	if (raster->cur_command != 0 && (data & 0xFF000000u) == 0xFF000000u)
+		raster->cur_command = 0;
+	if (data == 0xFF00000Fu)                 // silicon clear/swap = cpres2 frame boundary (vblank-synced)
+	{
+		raster->cur_command = 0;             // terminate any stale strip so frame-setup cmds parse cleanly
+		geo_sharc_present_frame();           // rasterize the just-completed frame to destmap
+		render_frame_start();                // clear the poly list for the next frame
+		return;
+	}
+	if (raster->cur_command == 0)            // this word starts a NEW raster command
+	{
+		// model2_3d_push only implements raster commands 0/1/3/4/8 (the low nibble IS the command).
+		// cpres2 also emits others (e.g. 0xC) the HLE rasterizer doesn't have — skip them so the bridge
+		// doesn't fatalerror, regardless of the high bits (cpres2 uses both 0xFF0000_0N and bare 0N).
+		{
+			u32 cmd = data & 0x0f;
+			if (cmd != 0 && cmd != 1 && cmd != 3 && cmd != 4 && cmd != 8)
+				return;                      // skip silicon-only/unimplemented raster commands
+		}
+	}
+	model2_3d_push(raster, data);
+}
+
 void model2_state::model2_3d_push(raster_state *raster, u32 input)
 {
 	/* see if we have a command in progress */
@@ -1722,6 +1900,20 @@ u32 *model2_state::geo_object_data(geo_state *geo, u32 opcode, u32 *input)
 
 	u32 *obp;                /* Object Pointer */
 
+	// M2-X11 diag: dump the HLE's transform matrix (raw bits) per object so we can diff it against
+	// cpres2's stored DM 0x30020 (GEOMTX) and test whether cpres2's matrix state is wrong.
+	{
+		static int s_hlemtx_n = 0;
+		if ((s_hlemtx_n % 40) == 0 && s_hlemtx_n < 240)
+			logerror("HLEMTX @oba=%08X m[0..B]= %08X %08X %08X | %08X %08X %08X | %08X %08X %08X | %08X %08X %08X || focus=(%08X,%08X)\n",
+				oba, f2u(geo->matrix[0]), f2u(geo->matrix[1]), f2u(geo->matrix[2]),
+				f2u(geo->matrix[3]), f2u(geo->matrix[4]), f2u(geo->matrix[5]),
+				f2u(geo->matrix[6]), f2u(geo->matrix[7]), f2u(geo->matrix[8]),
+				f2u(geo->matrix[9]), f2u(geo->matrix[10]), f2u(geo->matrix[11]),
+				f2u(geo->focus.x), f2u(geo->focus.y));
+		s_hlemtx_n++;
+	}
+
 	/* push the initial set of data to the 3d rasterizer */
 	model2_3d_push(raster, opcode >> 23);
 	model2_3d_push(raster, tpa);
@@ -2285,6 +2477,7 @@ u32 *model2_state::geo_code_jump(geo_state *geo, u32 opcode, u32 *input)
 
 u32 *model2_state::geo_process_command(geo_state *geo, u32 opcode, u32 *input, bool *end_code)
 {
+	m_hle_op_count[(opcode >> 23) & 0x1f]++;   // M2-X11: HLE-side opcode census (compare vs cpres2's)
 	switch ((opcode >> 23) & 0x1f)
 	{
 		case 0x00: input = geo_nop(geo, opcode, input);                   break;
@@ -2332,8 +2525,34 @@ void model2_state::geo_parse()
 	u32  op_count = 0;
 	bool end_code = false;
 
+	/* DEBUG: dump the current frame's display list every frame (works for the
+	   polygon-test screen which uses read_start=0). Last write before pause is
+	   whatever is on screen. */
+	{
+		FILE *gf = fopen("geo_list_dump.bin", "wb");
+		if (gf)
+		{
+			u32 rs = m_geo_read_start_address;
+			u32 n  = 0x8000 - address; if (n > 0x800) n = 0x800;
+			fwrite(&rs, 4, 1, gf);
+			fwrite(&n,  4, 1, gf);
+			fwrite(&m_bufferram[address], 4, n, gf);
+			fclose(gf);
+		}
+	}
+
 	// reset raster frame variables
 	render_frame_start();
+
+	// M2-X11: dump the HLE opcode census every 1024 frames to compare vs cpres2's GEOOPCENSUS.
+	if ((m_framenum & 0x3ffu) == 0u && m_hle_op_dumped < 12)
+	{
+		logerror("HLEOPCENSUS f=%u: 1OBJ:%u 2DIR:%u 3:%u 4TEX:%u 5VLD:%u 6:%u 7:%u 8:%u Bmtx:%u Fend:%u\n",
+			m_framenum, m_hle_op_count[1], m_hle_op_count[2], m_hle_op_count[3], m_hle_op_count[4],
+			m_hle_op_count[5], m_hle_op_count[6], m_hle_op_count[7], m_hle_op_count[8],
+			m_hle_op_count[0xb], m_hle_op_count[0xf]);
+		m_hle_op_dumped++;
+	}
 
 	while (end_code == false && (input - m_bufferram) < 0x20000/4 && op_count++ < 0x8000)
 	{
