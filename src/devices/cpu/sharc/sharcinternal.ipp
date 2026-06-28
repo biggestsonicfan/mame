@@ -169,6 +169,7 @@ struct alignas(16) adsp21062_device::sharc_internal_state
 
 	uint32_t syscon;
 	uint32_t sysstat;
+	uint32_t msgr[8];   // M2-X11: IOP message registers MSGR0..7 (0x08..0x0F) - inter-processor handshake
 
 	struct
 	{

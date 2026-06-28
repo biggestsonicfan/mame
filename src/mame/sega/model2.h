@@ -169,9 +169,9 @@ protected:
 	u32 copro_status_r();
 
 	// Geometrizer communications
-	void geo_ctl1_w(u32 data);
+	virtual void geo_ctl1_w(u32 data);
 	u32 geo_prg_r(offs_t offset);
-	void geo_prg_w(u32 data);
+	virtual void geo_prg_w(u32 data);
 	u32 geo_r(offs_t offset);
 	void geo_w(offs_t offset, u32 data);
 
@@ -225,7 +225,7 @@ protected:
 	void push_geo_data(u32 data);
 	void reset_model2_scsp();
 	u32 screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect);
-	void screen_vblank(int state);
+	virtual void screen_vblank(int state);
 	void sound_ready_w(int state);
 	template <int TNum> TIMER_DEVICE_CALLBACK_MEMBER(model2_timer_cb);
 	void scsp_irq(offs_t offset, u8 data);
@@ -234,6 +234,8 @@ protected:
 	u16 crypt_read_callback(u32 addr);
 
 	void render_frame_start();
+	void geo_sharc_raster_push(u32 data);   // M2-X11: feed real cpres2 i1 stream into the rasterizer
+	void geo_sharc_present_frame();         // M2-X11: rasterize the completed cpres2 frame to destmap (at FF00000F)
 	void geo_parse();
 	void render_polygons(bitmap_rgb32 &bitmap, const rectangle &cliprect);
 	void draw_framebuffer(bitmap_rgb32 &bitmap, const rectangle &cliprect);
@@ -247,7 +249,6 @@ protected:
 	void sega_0229_map(address_map &map) ATTR_COLD;
 	void drive_io_map(address_map &map) ATTR_COLD;
 	void drive_map(address_map &map) ATTR_COLD;
-	void geo_sharc_map(address_map &map) ATTR_COLD;
 	void model2_base_mem(address_map &map) ATTR_COLD;
 	void model2_5881_mem(address_map &map) ATTR_COLD;
 	void model2_0229_mem(address_map &map) ATTR_COLD;
@@ -263,9 +264,13 @@ protected:
 	virtual void copro_halt() = 0;
 	virtual void copro_boot() = 0;
 
-private:
-	u32 m_geoctl = 0;
+protected:
+	u32 m_geoctl = 0;    // M2-X11: protected so model2b_state's geo SHARC overrides can boot/stream
 	u32 m_geocnt = 0;
+	bool m_hle_geo_off = false;   // M2-X11: env M2_HLE_GEO_OFF disables the HLE geo_parse (see screen_vblank)
+	u32  m_hle_op_count[32] = {}; // M2-X11: HLE-side opcode census, to compare vs cpres2's m_geo_op_count
+	u32  m_hle_op_dumped = 0;
+private:
 	u32 m_videocontrol = 0;
 	u32 m_framenum = 0;
 
@@ -534,6 +539,7 @@ public:
 	model2b_state(const machine_config &mconfig, device_type type, const char *tag) :
 		model2_state(mconfig, type, tag),
 		m_copro_adsp(*this, "copro_adsp"),
+		m_geo_adsp(*this, "geo_adsp"),
 		m_billboard(*this, "billboard")
 	{}
 
@@ -552,12 +558,52 @@ protected:
 	virtual void machine_reset() override ATTR_COLD;
 
 	required_device<adsp21062_device> m_copro_adsp;
+	// M2-X11: the REAL geometrizer SHARC (cpres2), running the actual GEO microcode the
+	// game uploads, in parallel with the HLE geo_parse. Boots on the geo ctl (0x980008)
+	// hi-bit edge; firmware streamed via the geo program FIFO (0x804000 -> geo_prg_w).
+	required_device<adsp21062_device> m_geo_adsp;
+	const u32 *m_geo_polyrom = nullptr;   // M2-X11: "polygons" (Models) ROM base for cpres2's OBJECT mesh fetch
+	u32 m_geo_polyrom_mask = 0;
+	// M2-X11: cpres2's OBJECT vertex-work region (i5=0x420000..0x43ffff). On real silicon the COP
+	// streams mesh verts through a request/response port: cpres2 writes a mesh index (oba+counter) to
+	// 0x430000 and reads the vertex back from 0x430001. We emulate that port by serving the requested
+	// polygon-ROM word on the response read; the rest is plain backing RAM (op5 vert-load writes here).
+	std::vector<u32> m_geo_vwork;         // backing store for 0x420000..0x43ffff
+	u32 m_geo_vreq = 0;                   // last mesh index written to the streaming request port 0x430000
+	u32 m_geo_vstream_log_n = 0;          // M2-X11 diag: streaming request/response trace counter
+	u32 geo_vwork_r(offs_t offset);
+	void geo_vwork_w(offs_t offset, u32 data);
 
 	void copro_function_port_w(offs_t offset, u32 data);
 	u32 copro_fifo_r();
 	void copro_fifo_w(u32 data);
 	u32 copro_sharc_buffer_r(offs_t offset);
 	void copro_sharc_buffer_w(offs_t offset, u32 data);
+
+	// M2-X11: real geometrizer SHARC (cpres2) plumbing.
+	virtual void screen_vblank(int state) override; // also drives m_geo_adsp FLAG0 = vblank (frame sync)
+	void geo_sharc_map(address_map &map) ATTR_COLD; // m_geo_adsp AS_DATA map
+	virtual void geo_ctl1_w(u32 data) override;     // boot/halt m_geo_adsp + base bookkeeping
+	virtual void geo_prg_w(u32 data) override;      // route firmware upload -> external_dma_write
+	u32  geo_cmd_r(offs_t offset);                  // i0=0x400000 command input, offset by read_start
+	u32  geo_poly_r(offs_t offset);                 // M2-X11: OBJECT mesh fetch -> polygon ROM (oba bit23)
+	u32  geo_himem_r(offs_t offset);                // M2-X11: log+0 the OBJECT mesh-fetch addresses (calibration)
+	u32  m_geo_himem_log_n = 0;
+	u32  m_geo_obj_log_n = 0;                       // M2-X11: log when cpres2 READS an OBJECT cmd (0x00800101)
+	u32  m_geo_vbl_log_n = 0;                       // M2-X11: log read_start + bank head each frame
+	u32  m_geo_trace_n = 0;                         // M2-X11: words left to trace after a MATRIX/OBJECT cmd
+	u32  m_geo_trace_cnt = 0;
+	void geo_raster_w(offs_t offset, u32 data);     // i1=0x410000 raster output capture
+	u32  geo_raster_r(offs_t offset);
+	// captured cpres2 raster-port (i1) output stream, for dump/diff vs the OBJ + HLE.
+	std::vector<u32> m_geo_raster_cap;
+	bool m_geo_sharc_booted = false;
+	u32  m_geo_raster_log_n = 0;   // how many i1 writes we've logged THIS FRAME (reset each vblank)
+	u32  m_geo_frame = 0;          // frame counter for the rolling per-frame raster log
+	u32  m_geo_frame_geom = 0;     // non-terminator emits seen this frame (to spot geometry frames)
+	u32  m_geo_cmd_ptr = 0;        // HW auto-advancing read pointer for the i0=0x400000 command FIFO
+	u32  m_geo_op_count[32] = {};  // M2-X11: census of opcodes cpres2 dispatches (which handlers run)
+	u32  m_geo_op_dumped = 0;      // how many times we've dumped the census
 
 	void model2b_crx_mem(address_map &map) ATTR_COLD;
 	void model2b_5881_mem(address_map &map) ATTR_COLD;

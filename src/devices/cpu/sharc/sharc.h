@@ -41,6 +41,9 @@ public:
 	void set_flag_input(int flag_num, int state);
 	void write_stall(int state);
 
+	void set_m2_xtrace(bool e) { m_m2_xtrace = e; }   // M2-X11: enable cpres2 transform single-step trace
+	bool m_m2_xtrace = false;
+
 	template <unsigned N> uint64_t pm_r(offs_t offset);
 	template <unsigned N> void pm_w(offs_t offset, uint64_t data, uint64_t mem_mask = ~0);
 	template <unsigned N> uint32_t dm_short_r(offs_t offset);

@@ -17,8 +17,11 @@
 
 inline u16 model2_renderer::get_texel(u32 base_x, u32 base_y, int x, int y, const u32 *sheet)
 {
-	int x2 = base_x + x;
-	int y2 = base_y + y;
+	// M2-X11: tile coords into the 2048x1024 logical sheet. Valid polys never exceed this (no-op for the
+	// HLE), but the real cpres2 occasionally emits a poly with garbage texture UVs; without this the
+	// out-of-range index reads far past the sheet -> access violation in the worker render thread.
+	int x2 = (base_x + x) & 2047;
+	int y2 = (base_y + y) & 1023;
 	if (x2 >= 1024)
 	{
 		// texture sheets are mapped as 2048x1024 but stored in RAM as 1024x2048
@@ -301,7 +304,10 @@ void model2_renderer::draw_scanline_tex(int32_t scanline, const extent_t &extent
 		float const z = 1.0F / ooz;
 
 		s32 const mml = -object.texlod + fast_log2(z);    // equivalent to log2(z^2)
-		s32 const level = std::clamp(mml >> 7, 0, max_level);
+		// M2-X11 TEST (M2_FORCE_LOD0): the real-cpres2 texquad emits a coarse LOD vs the HLE (0504.png),
+		// so object 1's texture renders as a downsampled/blocky mip instead of the full-detail LOD0 sheet.
+		// Force the base mip to 0 to verify the texram data is correct and only the mip selection is off.
+		s32 const level = getenv("M2_FORCE_LOD0") ? 0 : std::clamp(mml >> 7, 0, max_level);
 
 		// we give texture coordinates 8 fractional bits
 		s32 const u = s32(uoz * z * 256.0F);

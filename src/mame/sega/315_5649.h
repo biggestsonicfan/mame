@@ -54,6 +54,10 @@ public:
 	uint8_t read(offs_t offset);
 	void write(offs_t offset, uint8_t data);
 
+	// Emulator host-injection: push a byte into a channel's RX FIFO as if a
+	// remote RS-422 peer had sent it. (Also invoked internally by LOOP echo.)
+	void serial_rx(unsigned ch, uint8_t data);
+
 protected:
 	// device-level overrides
 	virtual void device_start() override ATTR_COLD;
@@ -72,6 +76,32 @@ private:
 	uint8_t m_port_config;
 	uint8_t m_mode;
 	int m_analog_channel;
+
+	// RS-422 hardware loopback (MODE bit4): a TX byte is echoed straight into
+	// the same channel's receive FIFO entirely on-chip. Used by the m2-x11 X11
+	// server's transport self-test; gated on the LOOP bit so non-loopback games
+	// keep the legacy callback/flag behaviour.
+	static constexpr unsigned LOOP_FIFO_SIZE = 16;
+	uint8_t m_loop_fifo[2][LOOP_FIFO_SIZE];   // board-visible RX FIFOs (read via RXD1/2)
+	uint8_t m_loop_head[2];
+	uint8_t m_loop_count[2];
+	bool m_serial_live;   // true once LOOP or host injection has driven the link
+
+	// Faithful two-channel transaction model (matches the real serial_stuff link):
+	// TXD2 is latched, the TXD1 write is the strobe that runs one transfer and
+	// synthesises the peer reply from the host->board queue (filled by injection).
+	static constexpr unsigned HOST_TX_SIZE = 4096;
+	uint8_t  m_tx_latch;                       // last TXD2 (data) byte written
+	uint8_t  m_hosttx_fifo[HOST_TX_SIZE];      // host -> board data queue
+	uint16_t m_hosttx_head;
+	uint16_t m_hosttx_count;
+
+	// board -> host capture: data bytes the board sends (DATA-command strobes)
+	// are queued here for the emulator host to read back (RXD-pop @ offset 0x07,
+	// count @ offset 0x08). Lets the MCP bridge act as the remote X11 client.
+	uint8_t  m_hostrx_fifo[HOST_TX_SIZE];
+	uint16_t m_hostrx_head;
+	uint16_t m_hostrx_count;
 };
 
 // device type definition
