@@ -31,11 +31,15 @@
 #define UIREG(x)    uint32_t(m_core->r[x].r)
 #define FREG(x)     (m_core->r[x].f)
 
+// ADSP-2106x circular-buffer wrap: the buffer occupies [B, B+L); a post-modified index that REACHES
+// B+L (not just exceeds it) wraps by subtracting L. MAME used '>' which fails to wrap when the index
+// lands exactly on B+L — e.g. a 12-element matrix buffer (b2=0x30020,l2=0xc) read with m=+1 lands on
+// 0x3002c=B+L and, unwrapped, fetches the next word (the focal) as a matrix coefficient. Use '>='.
 #define UPDATE_CIRCULAR_BUFFER_PM(x)                        \
 	{                                                       \
 		if (PM_REG_L(x) != 0)                               \
 		{                                                   \
-			if (PM_REG_I(x) > PM_REG_B(x)+PM_REG_L(x))      \
+			if (PM_REG_I(x) >= PM_REG_B(x)+PM_REG_L(x))     \
 			{                                               \
 				PM_REG_I(x) -= PM_REG_L(x);                 \
 			}                                               \
@@ -50,7 +54,7 @@
 	{                                                       \
 		if (DM_REG_L(x) != 0)                               \
 		{                                                   \
-			if (DM_REG_I(x) > DM_REG_B(x)+DM_REG_L(x))      \
+			if (DM_REG_I(x) >= DM_REG_B(x)+DM_REG_L(x))     \
 			{                                               \
 				DM_REG_I(x) -= DM_REG_L(x);                 \
 			}                                               \
