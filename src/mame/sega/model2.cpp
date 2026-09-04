@@ -4911,6 +4911,32 @@ ROM_START( sfight ) /* Sonic The Fighters, Model 2B */
 	ROM_LOAD16_WORD_SWAP("mpr-19025.35", 0x600000, 0x200000, CRC(6ad8fb70) SHA1(b666d31f9be26eb0cdcb71041a3c3c08d5aa41e1) )
 ROM_END
 
+ROM_START( geoserial ) /* Geoserial - Sonic The Fighters program ROMs on a Power Sled ROM board, for GEO serial testing */
+	ROM_REGION( 0x200000, "maincpu", 0 ) // i960 program (Sonic The Fighters)
+	ROM_LOAD32_WORD("epr-19001.15", 0x000000, 0x080000, CRC(9b088511) SHA1(20718d985d14f4d2b1b8e982bfbebddd73cdb972) )
+	ROM_LOAD32_WORD("epr-19002.16", 0x000002, 0x080000, CRC(46f510da) SHA1(edcbf61122db568ccaa4c3106f507087c1740c9b) )
+
+	ROM_REGION32_LE( 0x2000000, "main_data", 0 ) // Data (Power Sled)
+	ROM_LOAD32_WORD("fpr-19468.11", 0x0000000, 0x400000, CRC(56fae4e2) SHA1(795db62467eb1cb5b375e05bf168573baacfd657) )
+	ROM_LOAD32_WORD("fpr-19469.12", 0x0000002, 0x400000, CRC(5579c922) SHA1(d2bd10adf959e4e648f2f51a1a0463e077fa9c60) )
+
+	ROM_REGION( 0x1000000, "polygons", 0 ) // Models (Power Sled)
+	ROM_LOAD32_WORD("fpr-19455.17", 0x000000, 0x400000, CRC(165ee345) SHA1(2cfd3da4f90fcae8a6d2802976ed0ea5abc7df2f) )
+	ROM_LOAD32_WORD("fpr-19456.21", 0x000002, 0x400000, CRC(c3b2e2c5) SHA1(6dcd173726395fd0f115196470063bfb7c6891b8) )
+
+	ROM_REGION( 0x800000, "textures", 0 ) // Textures (Power Sled)
+	ROM_LOAD32_WORD("fpr-19458.27", 0x000000, 0x400000, CRC(f24acca2) SHA1(7fd7da64e247e62aa6542e1ad1a9ea9527ac9e73) )
+	ROM_LOAD32_WORD("fpr-19457.25", 0x000002, 0x400000, CRC(79d7e6fa) SHA1(906986145c23fc87ea7205d7722302104665e2bb) )
+
+	ROM_REGION32_LE( 0x800000, "copro_data", ROMREGION_ERASE00 ) // Copro extra data (collision/height map/etc)
+
+	ROM_REGION( 0x080000, "audiocpu", 0 ) // Sound program (Power Sled)
+	ROM_LOAD16_WORD_SWAP("epr-19466.31", 0x000000, 0x020000, CRC(c42892a5) SHA1(8ef761f6da3febcdf29b2d9b1bdf60ee24530f3d) )
+
+	ROM_REGION16_BE( 0x800000, "samples", 0 ) // Samples (Power Sled)
+	ROM_LOAD16_WORD_SWAP("fpr-19459.32", 0x000000, 0x400000, CRC(a424743f) SHA1(3fd370c1b3f82a8785f1985587a39d3826b46392) )
+ROM_END
+
 ROM_START( stcc ) /* Sega Touring Car Championship, Model 2C - Defaults to Japan, Twin & Default View set to Bird's */
 	ROM_REGION( 0x200000, "maincpu", 0 ) // i960 program
 	ROM_LOAD32_WORD("epr-19570.15", 0x000000, 0x080000, CRC(9d6a1965) SHA1(6f1e75d86a37b8579f968b2fb51d32a1a860697f) ) /* Higher rom numbers indicate a newer version */
@@ -8033,6 +8059,7 @@ GAME( 1995, vonj,       von,      model2b,      von,       model2b_state, empty_
 GAME( 1995, vonr,       von,      model2b,      von,       model2b_state, empty_init,    ROT0, "Sega",   "Cyber Troopers Virtual-On - Relay (Japan)", MACHINE_NOT_WORKING )
 GAME( 1996, schamp,     0,        model2b,      schamp,    model2b_state, empty_init,    ROT0, "Sega",   "Sonic Championship (USA)", MACHINE_NOT_WORKING )
 GAME( 1996, sfight,     schamp,   model2b,      schamp,    model2b_state, empty_init,    ROT0, "Sega",   "Sonic the Fighters (Japan)", MACHINE_NOT_WORKING )
+GAME( 1996, geoserial,  schamp,   model2b,      schamp,    model2b_state, empty_init,    ROT0, "hack",   "Geoserial (Sonic the Fighters program on Power Sled ROM board)", MACHINE_NOT_WORKING )
 GAME( 1996, lastbrnx,   0,        model2b,      vf2,       model2b_state, empty_init,    ROT0, "Sega",   "Last Bronx (Export, Revision A)", MACHINE_NOT_WORKING )
 GAME( 1996, lastbrnxu,  lastbrnx, model2b,      vf2,       model2b_state, empty_init,    ROT0, "Sega",   "Last Bronx (USA, Revision A)", MACHINE_NOT_WORKING )
 GAME( 1996, lastbrnxj,  lastbrnx, model2b,      vf2,       model2b_state, empty_init,    ROT0, "Sega",   "Last Bronx: Tokyo Bangaichi (Japan, Revision A)", MACHINE_NOT_WORKING )
