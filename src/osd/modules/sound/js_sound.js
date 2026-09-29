@@ -13,6 +13,17 @@ var jsmame_web_audio = (function () {
 
 var context = null;
 var gain_node = null;
+// MAME renders at its configured sample rate (-samplerate, 48000 by default) and never asks the
+// browser for its own, so the context is opened at that rate and the browser resamples. With
+// a 44.1 kHz device and a 48 kHz context MAME fed 9% more than was played: the ring below sat
+// full (~0.45 s behind) and kept dropping samples.
+var MAME_RATE = 48000;
+var BLOCK = 2048;                  // frames per audio callback (~43 ms)
+var MAX_FRAMES = BLOCK * 4;        // latency cap: drop the oldest audio beyond this
+var PRIME_FRAMES = BLOCK * 3 / 2;  // after an underrun, wait for this much before playing
+var playing = false;
+var underruns = 0;
+var lastL = 0, lastR = 0;
 var eventNode = null;
 var sampleScale = 32766;
 var inputBuffer = new Float32Array(44100);
@@ -29,8 +40,12 @@ function lazy_init () {
 		return;
 	}
 	if (typeof AudioContext != "undefined") {
-		//Standard context creation:
-		context = new AudioContext();
+		//Standard context creation, at MAME's rate:
+		try {
+			context = new AudioContext({ sampleRate: MAME_RATE, latencyHint: "interactive" });
+		} catch (e) {
+			context = new AudioContext();
+		}
 	}
 	else if (typeof webkitAudioContext != "undefined") {
 		//Older webkit context creation:
@@ -54,11 +69,11 @@ function init_event() {
 	//Generate a streaming node point:
 	if (typeof context.createScriptProcessor == "function") {
 		//Current standard compliant way:
-		eventNode = context.createScriptProcessor(4096, 0, 2);
+		eventNode = context.createScriptProcessor(BLOCK, 0, 2);
 	}
 	else {
 		//Deprecated way:
-		eventNode = context.createJavaScriptNode(4096, 0, 2);
+		eventNode = context.createJavaScriptNode(BLOCK, 0, 2);
 	}
 	//Make our tick function the audio callback function:
 	eventNode.onaudioprocess = tick;
@@ -136,6 +151,14 @@ function stream_sink_update (
 			}
 		}
 	}
+	//Keep the delay bounded: beyond MAX_FRAMES, drop the oldest audio (one jump, not a
+	//steady trickle of drops as the ring overflows):
+	var count = rear - start;
+	if (count < 0) count += bufferSize;
+	if (count > MAX_FRAMES * 2) {
+		start = rear - PRIME_FRAMES * 2;
+		if (start < 0) start += bufferSize;
+	}
 };
 
 function tick (event) {
@@ -144,18 +167,29 @@ function tick (event) {
 		buffers[bufferCount] = event.outputBuffer.getChannelData(bufferCount);
 	}
 	//Copy samples from the input buffer to the Web Audio API:
-	for (var index = 0; index < 4096 && start != rear; ++index) {
-		buffers[0][index] = inputBuffer[start++];
-		buffers[1][index] = inputBuffer[start++];
+	//Jitter buffer: MAME hands over audio a frame at a time, unevenly; after running dry,
+	//stay silent until a cushion of PRIME_FRAMES has built up again:
+	var have = rear - start;
+	if (have < 0) have += bufferSize;
+	if (!playing && have >= PRIME_FRAMES * 2) playing = true;
+	var index = 0;
+	if (playing) for (; index < BLOCK && start != rear; ++index) {
+		lastL = buffers[0][index] = inputBuffer[start++];
+		lastR = buffers[1][index] = inputBuffer[start++];
 		if (start == bufferSize) {
 			start = 0;
 		}
 	}
-	//Pad with latest if we're underrunning:
-	var idx = (index == 0 ? bufferSize : index) - 1;
-	while (index < 4096) {
-		buffers[0][index] = buffers[0][idx];
-		buffers[1][index++] = buffers[1][idx];
+	//Underrun: fade from the last sample to silence (holding it was a click and a DC step):
+	if (index < BLOCK) {
+		if (playing) underruns++;
+		playing = false;
+		for (var k = 0; index < BLOCK; ++index, ++k) {
+			var g = k < 256 ? 1 - k / 256 : 0;
+			buffers[0][index] = lastL * g;
+			buffers[1][index] = lastR * g;
+		}
+		lastL = lastR = 0;
 	}
 	//Deep inside the bowels of vendors bugs,
 	//we're using watchdog for a firefox bug,
@@ -184,13 +218,19 @@ function sample_count() {
 	return count;
 }
 
+function underrun_count() {
+	return underruns;
+}
+
 return {
 	stream_sink_update: stream_sink_update,
 	get_context: get_context,
-	sample_count: sample_count
+	sample_count: sample_count,
+	underrun_count: underrun_count
 };
 
 })();
 
 window.jsmame_stream_sink_update = jsmame_web_audio.stream_sink_update;
 window.jsmame_sample_count = jsmame_web_audio.sample_count;
+window.jsmame_underrun_count = jsmame_web_audio.underrun_count;
