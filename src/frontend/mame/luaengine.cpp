@@ -1751,6 +1751,14 @@ void lua_engine::initialize()
 					return sol::lua_nil;
 				return sol::make_object(s, device_state_entries(*state));
 			});
+	device_type["total_cycles"] = sol::property(
+			[] (device_t &dev) -> std::optional<u64>
+			{
+				device_execute_interface const *exec;
+				if (!dev.interface(exec))
+					return std::nullopt;
+				return exec->total_cycles();
+			});
 	// FIXME: turn into a wrapper - it's stupid slow to walk on every property access
 	// also, this mixes up things like RAM areas with stuff saved by the device itself, so there's potential for key conflicts
 	device_type["items"] = sol::property(

@@ -209,6 +209,11 @@ device.state[] (read-only)
     expose the register state interface, indexed by symbol, or ``nil`` for other
     devices.  The index operator and ``index_of`` methods have O(n) complexity;
     all other supported operations have O(1) complexity.
+device.total_cycles (read-only)
+    The number of cycles the device has executed since it started, for devices
+    that implement the execute interface, or ``nil`` for other devices.  Read
+    from a memory tap or other callback while the device is executing, it
+    includes the cycles of the current timeslice up to that point.
 device.spaces[] (read-only)
     A table of the device’s :ref:`address spaces <luascript-ref-addrspace>`,
     indexed by name.  Only valid for devices that implement the memory
