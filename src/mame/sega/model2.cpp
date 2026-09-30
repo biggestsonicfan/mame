@@ -4911,6 +4911,64 @@ ROM_START( sfight ) /* Sonic The Fighters, Model 2B */
 	ROM_LOAD16_WORD_SWAP("mpr-19025.35", 0x600000, 0x200000, CRC(6ad8fb70) SHA1(b666d31f9be26eb0cdcb71041a3c3c08d5aa41e1) )
 ROM_END
 
+ROM_START( m2kernel ) /* m2-kernel - an m2-sdk debug kernel in program ROM pair 1, Sonic The Fighters in pair 2, Model 2B */
+	ROM_REGION( 0x200000, "maincpu", 0 ) // i960 program
+	// program pair 1 (boots): the kernel, built by m2-sdk (src/kernel.c); homebrew, so no fixed hash
+	ROM_LOAD32_WORD("m2kernel.15",  0x000000, 0x080000, NO_DUMP )
+	ROM_LOAD32_WORD("m2kernel.16",  0x000002, 0x080000, NO_DUMP )
+	// program pair 2: Sonic The Fighters' program, which the kernel reads at 0x100000
+	ROM_LOAD32_WORD("epr-19001.13", 0x100000, 0x080000, CRC(9b088511) SHA1(20718d985d14f4d2b1b8e982bfbebddd73cdb972) ) // = sfight epr-19001.15
+	ROM_LOAD32_WORD("epr-19002.14", 0x100002, 0x080000, CRC(46f510da) SHA1(edcbf61122db568ccaa4c3106f507087c1740c9b) ) // = sfight epr-19002.16
+
+	ROM_REGION32_LE( 0x2000000, "main_data", 0 ) // Data
+	ROM_LOAD32_WORD("mpr-19007.11",    0x0000000, 0x400000, CRC(8b8ff751) SHA1(5343a9a2502052e3587424c984bd48caa7564849) )
+	ROM_LOAD32_WORD("mpr-19008.12",    0x0000002, 0x400000, CRC(a94654f5) SHA1(39ad2e9431543ea6cbc0307bc39933cf64956a74) )
+	ROM_LOAD32_WORD("mpr-19005.9",     0x0800000, 0x400000, CRC(98cd1127) SHA1(300c9cdef199f31255bacb95399e9c75be73f817) )
+	ROM_LOAD32_WORD("mpr-19006.10",    0x0800002, 0x400000, CRC(e79f0a26) SHA1(37a4ff13cfccfda587ca59a9ef08b5914d2c28d4) )
+	ROM_LOAD32_WORD("epr-19003.7",     0x1000000, 0x080000, CRC(63bae5c5) SHA1(cbd55b7b7376ac2f67befaf4c43eef3727ba7b7f) )
+	ROM_LOAD32_WORD("epr-19004.8",     0x1000002, 0x080000, CRC(c10c9f39) SHA1(cf806501dbfa48d16cb7ed5f39a6146f734ba455) )
+	ROM_COPY( "main_data", 0x1000000, 0x1100000, 0x100000 )
+	ROM_COPY( "main_data", 0x1000000, 0x1200000, 0x100000 )
+	ROM_COPY( "main_data", 0x1000000, 0x1300000, 0x100000 )
+	ROM_COPY( "main_data", 0x1000000, 0x1400000, 0x100000 )
+	ROM_COPY( "main_data", 0x1000000, 0x1500000, 0x100000 )
+	ROM_COPY( "main_data", 0x1000000, 0x1600000, 0x100000 )
+	ROM_COPY( "main_data", 0x1000000, 0x1700000, 0x100000 )
+	ROM_COPY( "main_data", 0x1000000, 0x1800000, 0x100000 )
+	ROM_COPY( "main_data", 0x1000000, 0x1900000, 0x100000 )
+	ROM_COPY( "main_data", 0x1000000, 0x1a00000, 0x100000 )
+	ROM_COPY( "main_data", 0x1000000, 0x1b00000, 0x100000 )
+	ROM_COPY( "main_data", 0x1000000, 0x1c00000, 0x100000 )
+	ROM_COPY( "main_data", 0x1000000, 0x1d00000, 0x100000 )
+	ROM_COPY( "main_data", 0x1000000, 0x1e00000, 0x100000 )
+	ROM_COPY( "main_data", 0x1000000, 0x1f00000, 0x100000 )
+
+	ROM_REGION32_LE( 0x800000, "copro_data", 0 ) // Copro extra data (collision/height map/etc)
+	ROM_LOAD32_WORD("mpr-19015.29", 0x000000, 0x200000, CRC(c74d99e3) SHA1(9914be9925b86af6af670745b5eba3a9e4f24af9) )
+	ROM_LOAD32_WORD("mpr-19016.30", 0x000002, 0x200000, CRC(746ae931) SHA1(a6f0f589ad174a34493ee24dc0cb509ead3aed70) )
+
+	ROM_REGION( 0x1000000, "polygons", 0 ) // Models
+	ROM_LOAD32_WORD("mpr-19009.17", 0x000000, 0x400000, CRC(fd410350) SHA1(5af3a90c87ec8a90a8fc58ae469ef23ec6e6213c) )
+	ROM_LOAD32_WORD("mpr-19012.21", 0x000002, 0x400000, CRC(9bb7b5b6) SHA1(8e13a0bb34e187a340b38d76ab15ff6fe4bae764) )
+	ROM_LOAD32_WORD("mpr-19010.18", 0x800000, 0x400000, CRC(6fd94187) SHA1(e3318ef0eb0168998e139e527339c7c667c17fb1) )
+	ROM_LOAD32_WORD("mpr-19013.22", 0x800002, 0x400000, CRC(9e232fe5) SHA1(a6c4b2b3bf8efc6f6263f73d6f4cacf9785010c1) )
+
+	ROM_REGION( 0x1000000, "textures", 0 ) // Textures
+	ROM_LOAD32_WORD("mpr-19019.27", 0x000000, 0x400000, CRC(59121896) SHA1(c29bedb41b14d63c6067ae12ad009deaafca2aa4) )
+	ROM_LOAD32_WORD("mpr-19017.25", 0x000002, 0x400000, CRC(7b298379) SHA1(52fad61412040c90c7dd300c0fd7aa5b8d5af441) )
+	ROM_LOAD32_WORD("mpr-19020.28", 0x800000, 0x400000, CRC(9540dba0) SHA1(7b9a75caa8c5b12ba54c6f4f746d80b165ee97ab) )
+	ROM_LOAD32_WORD("mpr-19018.26", 0x800002, 0x400000, CRC(3b7e7a12) SHA1(9c707a7c2cffc5eff19f9919ddfae7300842fd19) )
+
+	ROM_REGION( 0x080000, "audiocpu", 0 ) // Sound program
+	ROM_LOAD16_WORD_SWAP("epr-19021.31", 0x000000, 0x080000, CRC(0b9f7583) SHA1(21290389cd8bd9e52ed438152cc6cb5793f809d3) )
+
+	ROM_REGION16_BE( 0x800000, "samples", 0 ) // Samples
+	ROM_LOAD16_WORD_SWAP("mpr-19022.32", 0x000000, 0x200000, CRC(4381869b) SHA1(43a21609b49926a227558d4938088526acf1fe42) )
+	ROM_LOAD16_WORD_SWAP("mpr-19023.33", 0x200000, 0x200000, CRC(07c67f88) SHA1(696dc85e066fb27c7618e52e0acd0d00451e4589) )
+	ROM_LOAD16_WORD_SWAP("mpr-19024.34", 0x400000, 0x200000, CRC(15ff76d3) SHA1(b431bd85c973aa0a4d6032ac98fb057139f142a2) )
+	ROM_LOAD16_WORD_SWAP("mpr-19025.35", 0x600000, 0x200000, CRC(6ad8fb70) SHA1(b666d31f9be26eb0cdcb71041a3c3c08d5aa41e1) )
+ROM_END
+
 ROM_START( geoserial ) /* Geoserial - Sonic The Fighters program ROMs on a Power Sled ROM board, for GEO serial testing */
 	ROM_REGION( 0x200000, "maincpu", 0 ) // i960 program (Sonic The Fighters)
 	ROM_LOAD32_WORD("epr-19001.15", 0x000000, 0x080000, CRC(9b088511) SHA1(20718d985d14f4d2b1b8e982bfbebddd73cdb972) )
@@ -8059,6 +8117,7 @@ GAME( 1995, vonj,       von,      model2b,      von,       model2b_state, empty_
 GAME( 1995, vonr,       von,      model2b,      von,       model2b_state, empty_init,    ROT0, "Sega",   "Cyber Troopers Virtual-On - Relay (Japan)", MACHINE_NOT_WORKING )
 GAME( 1996, schamp,     0,        model2b,      schamp,    model2b_state, empty_init,    ROT0, "Sega",   "Sonic Championship (USA)", MACHINE_NOT_WORKING )
 GAME( 1996, sfight,     schamp,   model2b,      schamp,    model2b_state, empty_init,    ROT0, "Sega",   "Sonic the Fighters (Japan)", MACHINE_NOT_WORKING )
+GAME( 1996, m2kernel,   sfight,   model2b,      schamp,    model2b_state, empty_init,    ROT0, "hack",   "m2-kernel (debug kernel, Sonic the Fighters in program ROM pair 2)", MACHINE_NOT_WORKING )
 GAME( 1996, geoserial,  schamp,   model2b,      schamp,    model2b_state, empty_init,    ROT0, "hack",   "Geoserial (Sonic the Fighters program on Power Sled ROM board)", MACHINE_NOT_WORKING )
 GAME( 1996, lastbrnx,   0,        model2b,      vf2,       model2b_state, empty_init,    ROT0, "Sega",   "Last Bronx (Export, Revision A)", MACHINE_NOT_WORKING )
 GAME( 1996, lastbrnxu,  lastbrnx, model2b,      vf2,       model2b_state, empty_init,    ROT0, "Sega",   "Last Bronx (USA, Revision A)", MACHINE_NOT_WORKING )
