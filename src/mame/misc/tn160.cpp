@@ -366,8 +366,6 @@ u8 tn160_state::p0_r()
 
 void tn160_state::machine_start()
 {
-	m_lcdseg.resolve();
-	m_backlight.resolve();
 	std::fill(std::begin(m_cell_mv), std::end(m_cell_mv), 0);
 	std::fill(std::begin(m_lcd_ram), std::end(m_lcd_ram), 0);
 	m_lcd_acc = 0; m_lcd_nbits = 0; m_lcd_phase = 0; m_lcd_addr = 0;
