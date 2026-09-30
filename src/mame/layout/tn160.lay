@@ -1,0 +1,134 @@
+<?xml version="1.0"?>
+<!-- license:CC0-1.0 -->
+<mamelayout version="2">
+	<element name="bezel"><rect><color red="0.100" green="0.100" blue="0.100" alpha="1.00" /></rect></element>
+	<element name="panel">
+		<rect state="0"><color red="0.280" green="0.250" blue="0.200" alpha="1.00" /></rect>
+		<rect state="1"><color red="0.000" green="0.722" blue="1.000" alpha="1.00" /></rect>
+	</element>
+	<element name="seg"><rect state="1"><color red="0.020" green="0.070" blue="0.130" alpha="1.00" /></rect></element>
+	<element name="num1"><text string="1" state="1"><color red="0.020" green="0.070" blue="0.130" alpha="1.00" /></text></element>
+	<element name="num2"><text string="2" state="1"><color red="0.020" green="0.070" blue="0.130" alpha="1.00" /></text></element>
+	<element name="num3"><text string="3" state="1"><color red="0.020" green="0.070" blue="0.130" alpha="1.00" /></text></element>
+	<element name="num4"><text string="4" state="1"><color red="0.020" green="0.070" blue="0.130" alpha="1.00" /></text></element>
+	<element name="num5"><text string="5" state="1"><color red="0.020" green="0.070" blue="0.130" alpha="1.00" /></text></element>
+	<element name="num6"><text string="6" state="1"><color red="0.020" green="0.070" blue="0.130" alpha="1.00" /></text></element>
+	<element name="num7"><text string="7" state="1"><color red="0.020" green="0.070" blue="0.130" alpha="1.00" /></text></element>
+	<element name="num8"><text string="8" state="1"><color red="0.020" green="0.070" blue="0.130" alpha="1.00" /></text></element>
+	<element name="num9"><text string="9" state="1"><color red="0.020" green="0.070" blue="0.130" alpha="1.00" /></text></element>
+	<element name="num10"><text string="10" state="1"><color red="0.020" green="0.070" blue="0.130" alpha="1.00" /></text></element>
+	<element name="num11"><text string="11" state="1"><color red="0.020" green="0.070" blue="0.130" alpha="1.00" /></text></element>
+	<element name="num12"><text string="12" state="1"><color red="0.020" green="0.070" blue="0.130" alpha="1.00" /></text></element>
+	<element name="t_chg"><text string="CHG" state="1"><color red="0.020" green="0.070" blue="0.130" alpha="1.00" /></text></element>
+	<element name="t_dischg"><text string="DISCHG" state="1"><color red="0.020" green="0.070" blue="0.130" alpha="1.00" /></text></element>
+	<element name="t_error"><text string="ERROR" state="1"><color red="0.020" green="0.070" blue="0.130" alpha="1.00" /></text></element>
+	<view name="Charger LCD">
+		<element ref="bezel"><bounds x="0" y="0" width="660" height="190" /></element>
+		<element ref="panel" name="backlight"><bounds x="20" y="20" width="620" height="150" /></element>
+		<element ref="seg" name="lcdseg39"><bounds x="38" y="40" width="96" height="26" /></element>
+		<element ref="panel" name="backlight"><bounds x="40" y="42" width="92" height="22" /></element>
+		<element ref="t_dischg" name="lcdseg39"><bounds x="43" y="43" width="86" height="20" /></element>
+		<element ref="seg" name="lcdseg37"><bounds x="38" y="74" width="70" height="26" /></element>
+		<element ref="panel" name="backlight"><bounds x="40" y="76" width="66" height="22" /></element>
+		<element ref="t_chg" name="lcdseg37"><bounds x="43" y="77" width="60" height="20" /></element>
+		<element ref="seg" name="lcdseg38"><bounds x="38" y="108" width="92" height="26" /></element>
+		<element ref="panel" name="backlight"><bounds x="40" y="110" width="88" height="22" /></element>
+		<element ref="t_error" name="lcdseg38"><bounds x="43" y="111" width="82" height="20" /></element>
+		<!-- bay 1: group0 bit0  frame=52 -->
+		<element ref="num1" name="lcdseg52"><bounds x="163" y="32" width="13" height="14" /></element>
+		<element ref="seg" name="lcdseg52"><bounds x="155" y="54" width="29" height="48" /></element>
+		<element ref="seg" name="lcdseg52"><bounds x="165" y="48" width="9" height="7" /></element>
+		<element ref="panel" name="backlight"><bounds x="157.5" y="56.5" width="24" height="43" /></element>
+		<element ref="seg" name="lcdseg40"><bounds x="160.5" y="61" width="17" height="8" /></element>
+		<element ref="seg" name="lcdseg44"><bounds x="160.5" y="72" width="17" height="8" /></element>
+		<element ref="seg" name="lcdseg48"><bounds x="160.5" y="83" width="17" height="8" /></element>
+		<!-- bay 2: group0 bit1  frame=53 -->
+		<element ref="num2" name="lcdseg53"><bounds x="201" y="32" width="13" height="14" /></element>
+		<element ref="seg" name="lcdseg53"><bounds x="193" y="54" width="29" height="48" /></element>
+		<element ref="seg" name="lcdseg53"><bounds x="203" y="48" width="9" height="7" /></element>
+		<element ref="panel" name="backlight"><bounds x="195.5" y="56.5" width="24" height="43" /></element>
+		<element ref="seg" name="lcdseg41"><bounds x="198.5" y="61" width="17" height="8" /></element>
+		<element ref="seg" name="lcdseg45"><bounds x="198.5" y="72" width="17" height="8" /></element>
+		<element ref="seg" name="lcdseg49"><bounds x="198.5" y="83" width="17" height="8" /></element>
+		<!-- bay 3: group0 bit2  frame=54 -->
+		<element ref="num3" name="lcdseg54"><bounds x="239" y="32" width="13" height="14" /></element>
+		<element ref="seg" name="lcdseg54"><bounds x="231" y="54" width="29" height="48" /></element>
+		<element ref="seg" name="lcdseg54"><bounds x="241" y="48" width="9" height="7" /></element>
+		<element ref="panel" name="backlight"><bounds x="233.5" y="56.5" width="24" height="43" /></element>
+		<element ref="seg" name="lcdseg42"><bounds x="236.5" y="61" width="17" height="8" /></element>
+		<element ref="seg" name="lcdseg46"><bounds x="236.5" y="72" width="17" height="8" /></element>
+		<element ref="seg" name="lcdseg50"><bounds x="236.5" y="83" width="17" height="8" /></element>
+		<!-- bay 4: group0 bit3  frame=55 -->
+		<element ref="num4" name="lcdseg55"><bounds x="277" y="32" width="13" height="14" /></element>
+		<element ref="seg" name="lcdseg55"><bounds x="269" y="54" width="29" height="48" /></element>
+		<element ref="seg" name="lcdseg55"><bounds x="279" y="48" width="9" height="7" /></element>
+		<element ref="panel" name="backlight"><bounds x="271.5" y="56.5" width="24" height="43" /></element>
+		<element ref="seg" name="lcdseg43"><bounds x="274.5" y="61" width="17" height="8" /></element>
+		<element ref="seg" name="lcdseg47"><bounds x="274.5" y="72" width="17" height="8" /></element>
+		<element ref="seg" name="lcdseg51"><bounds x="274.5" y="83" width="17" height="8" /></element>
+		<!-- bay 5: group1 bit0  frame=72 -->
+		<element ref="num5" name="lcdseg72"><bounds x="315" y="32" width="13" height="14" /></element>
+		<element ref="seg" name="lcdseg72"><bounds x="307" y="54" width="29" height="48" /></element>
+		<element ref="seg" name="lcdseg72"><bounds x="317" y="48" width="9" height="7" /></element>
+		<element ref="panel" name="backlight"><bounds x="309.5" y="56.5" width="24" height="43" /></element>
+		<element ref="seg" name="lcdseg56"><bounds x="312.5" y="61" width="17" height="8" /></element>
+		<element ref="seg" name="lcdseg64"><bounds x="312.5" y="72" width="17" height="8" /></element>
+		<element ref="seg" name="lcdseg68"><bounds x="312.5" y="83" width="17" height="8" /></element>
+		<!-- bay 6: group1 bit1  frame=73 -->
+		<element ref="num6" name="lcdseg73"><bounds x="353" y="32" width="13" height="14" /></element>
+		<element ref="seg" name="lcdseg73"><bounds x="345" y="54" width="29" height="48" /></element>
+		<element ref="seg" name="lcdseg73"><bounds x="355" y="48" width="9" height="7" /></element>
+		<element ref="panel" name="backlight"><bounds x="347.5" y="56.5" width="24" height="43" /></element>
+		<element ref="seg" name="lcdseg57"><bounds x="350.5" y="61" width="17" height="8" /></element>
+		<element ref="seg" name="lcdseg65"><bounds x="350.5" y="72" width="17" height="8" /></element>
+		<element ref="seg" name="lcdseg69"><bounds x="350.5" y="83" width="17" height="8" /></element>
+		<!-- bay 7: group1 bit2  frame=74 -->
+		<element ref="num7" name="lcdseg74"><bounds x="391" y="32" width="13" height="14" /></element>
+		<element ref="seg" name="lcdseg74"><bounds x="383" y="54" width="29" height="48" /></element>
+		<element ref="seg" name="lcdseg74"><bounds x="393" y="48" width="9" height="7" /></element>
+		<element ref="panel" name="backlight"><bounds x="385.5" y="56.5" width="24" height="43" /></element>
+		<element ref="seg" name="lcdseg58"><bounds x="388.5" y="61" width="17" height="8" /></element>
+		<element ref="seg" name="lcdseg66"><bounds x="388.5" y="72" width="17" height="8" /></element>
+		<element ref="seg" name="lcdseg70"><bounds x="388.5" y="83" width="17" height="8" /></element>
+		<!-- bay 8: group1 bit3  frame=75 -->
+		<element ref="num8" name="lcdseg75"><bounds x="429" y="32" width="13" height="14" /></element>
+		<element ref="seg" name="lcdseg75"><bounds x="421" y="54" width="29" height="48" /></element>
+		<element ref="seg" name="lcdseg75"><bounds x="431" y="48" width="9" height="7" /></element>
+		<element ref="panel" name="backlight"><bounds x="423.5" y="56.5" width="24" height="43" /></element>
+		<element ref="seg" name="lcdseg59"><bounds x="426.5" y="61" width="17" height="8" /></element>
+		<element ref="seg" name="lcdseg67"><bounds x="426.5" y="72" width="17" height="8" /></element>
+		<element ref="seg" name="lcdseg71"><bounds x="426.5" y="83" width="17" height="8" /></element>
+		<!-- bay 9: group2 bit0  frame=88 -->
+		<element ref="num9" name="lcdseg88"><bounds x="467" y="32" width="13" height="14" /></element>
+		<element ref="seg" name="lcdseg88"><bounds x="459" y="54" width="29" height="48" /></element>
+		<element ref="seg" name="lcdseg88"><bounds x="469" y="48" width="9" height="7" /></element>
+		<element ref="panel" name="backlight"><bounds x="461.5" y="56.5" width="24" height="43" /></element>
+		<element ref="seg" name="lcdseg76"><bounds x="464.5" y="61" width="17" height="8" /></element>
+		<element ref="seg" name="lcdseg80"><bounds x="464.5" y="72" width="17" height="8" /></element>
+		<element ref="seg" name="lcdseg84"><bounds x="464.5" y="83" width="17" height="8" /></element>
+		<!-- bay 10: group2 bit1  frame=89 -->
+		<element ref="num10" name="lcdseg89"><bounds x="505" y="32" width="13" height="14" /></element>
+		<element ref="seg" name="lcdseg89"><bounds x="497" y="54" width="29" height="48" /></element>
+		<element ref="seg" name="lcdseg89"><bounds x="507" y="48" width="9" height="7" /></element>
+		<element ref="panel" name="backlight"><bounds x="499.5" y="56.5" width="24" height="43" /></element>
+		<element ref="seg" name="lcdseg77"><bounds x="502.5" y="61" width="17" height="8" /></element>
+		<element ref="seg" name="lcdseg81"><bounds x="502.5" y="72" width="17" height="8" /></element>
+		<element ref="seg" name="lcdseg85"><bounds x="502.5" y="83" width="17" height="8" /></element>
+		<!-- bay 11: group2 bit2  frame=90 -->
+		<element ref="num11" name="lcdseg90"><bounds x="543" y="32" width="13" height="14" /></element>
+		<element ref="seg" name="lcdseg90"><bounds x="535" y="54" width="29" height="48" /></element>
+		<element ref="seg" name="lcdseg90"><bounds x="545" y="48" width="9" height="7" /></element>
+		<element ref="panel" name="backlight"><bounds x="537.5" y="56.5" width="24" height="43" /></element>
+		<element ref="seg" name="lcdseg78"><bounds x="540.5" y="61" width="17" height="8" /></element>
+		<element ref="seg" name="lcdseg82"><bounds x="540.5" y="72" width="17" height="8" /></element>
+		<element ref="seg" name="lcdseg86"><bounds x="540.5" y="83" width="17" height="8" /></element>
+		<!-- bay 12: group2 bit3  frame=91 -->
+		<element ref="num12" name="lcdseg91"><bounds x="581" y="32" width="13" height="14" /></element>
+		<element ref="seg" name="lcdseg91"><bounds x="573" y="54" width="29" height="48" /></element>
+		<element ref="seg" name="lcdseg91"><bounds x="583" y="48" width="9" height="7" /></element>
+		<element ref="panel" name="backlight"><bounds x="575.5" y="56.5" width="24" height="43" /></element>
+		<element ref="seg" name="lcdseg79"><bounds x="578.5" y="61" width="17" height="8" /></element>
+		<element ref="seg" name="lcdseg83"><bounds x="578.5" y="72" width="17" height="8" /></element>
+		<element ref="seg" name="lcdseg87"><bounds x="578.5" y="83" width="17" height="8" /></element>
+	</view>
+</mamelayout>
