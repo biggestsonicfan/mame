@@ -128,36 +128,14 @@ static const rgb_t PALETTE_MOS[] =
 	} while (0)
 
 #define IS_PAL                  ((m_variant == TYPE_6569) || (m_variant == TYPE_6572) || (m_variant == TYPE_6573) || (m_variant == TYPE_8565) || (m_variant == TYPE_8566) || (m_variant == TYPE_8569))
+#define IS_6566                 (m_variant == TYPE_6566)
 #define IS_VICIIE               ((m_variant == TYPE_8564) || (m_variant == TYPE_8566) || (m_variant == TYPE_8569))
+#define FAST_MODE               (IS_VICIIE && BIT(m_reg[REGISTER_FAST], 0))
 
 #define ROW25_YSTART      0x33
 #define ROW25_YSTOP       0xfb
 #define ROW24_YSTART      0x37
 #define ROW24_YSTOP       0xf7
-
-#define RASTERLINE_2_C64(a)     (a)
-#define C64_2_RASTERLINE(a)     (a)
-#define XPOS                (VIC2_STARTVISIBLECOLUMNS + (VIC2_VISIBLECOLUMNS - VIC2_HSIZE) / 2)
-#define YPOS                (VIC2_STARTVISIBLELINES /* + (VIC2_VISIBLELINES - VIC2_VSIZE) / 2 */)
-#define FIRSTCOLUMN         50
-
-/* 2008-05 FP: lightpen code needs to read input port from c64.c and cbmb.c */
-
-#define LIGHTPEN_BUTTON     (m_in_lightpen_button_func(0))
-#define LIGHTPEN_X_VALUE    (m_in_lightpen_x_func(0))
-#define LIGHTPEN_Y_VALUE    (m_in_lightpen_y_func(0))
-
-/* lightpen delivers values from internal counters; they do not start with the visual area or frame area */
-#define VIC2_MAME_XPOS          0
-#define VIC2_MAME_YPOS          0
-#define VIC6567_X_BEGIN         38
-#define VIC6567_Y_BEGIN         -6             /* first 6 lines after retrace not for lightpen! */
-#define VIC6569_X_BEGIN         38
-#define VIC6569_Y_BEGIN         -6
-#define VIC2_X_BEGIN            (IS_PAL ? VIC6569_X_BEGIN : VIC6567_X_BEGIN)
-#define VIC2_Y_BEGIN            (IS_PAL ? VIC6569_Y_BEGIN : VIC6567_Y_BEGIN)
-#define VIC2_X_VALUE            ((LIGHTPEN_X_VALUE / 1.3) + 12)
-#define VIC2_Y_VALUE            ((LIGHTPEN_Y_VALUE      ) + 10)
 
 /* sprites 0 .. 7 */
 #define SPRITEON(nr)            (m_reg[0x15] & (1 << nr))
@@ -196,12 +174,13 @@ static const rgb_t PALETTE_MOS[] =
 #define MULTICOLOR2             (m_reg[0x23] & 0x0f)
 #define FOREGROUNDCOLOR         (m_reg[0x24] & 0x0f)
 
-#define VIC2_LINES              (IS_PAL ? VIC6569_LINES : VIC6567_LINES)
+#define VIC2_LINES              (IS_PAL ? VIC6569_LINES : IS_6566 ? VIC6566_LINES : VIC6567_LINES)
+#define VIC2_CYCLESPERLINE      (IS_PAL ? VIC6569_CYCLESPERLINE : IS_6566 ? VIC6566_CYCLESPERLINE : VIC6567_CYCLESPERLINE)
 #define VIC2_FIRST_DMA_LINE     (IS_PAL ? VIC6569_FIRST_DMA_LINE : VIC6567_FIRST_DMA_LINE)
 #define VIC2_LAST_DMA_LINE      (IS_PAL ? VIC6569_LAST_DMA_LINE : VIC6567_LAST_DMA_LINE)
 #define VIC2_FIRST_DISP_LINE    (IS_PAL ? VIC6569_FIRST_DISP_LINE : VIC6567_FIRST_DISP_LINE)
 #define VIC2_LAST_DISP_LINE     (IS_PAL ? VIC6569_LAST_DISP_LINE : VIC6567_LAST_DISP_LINE)
-#define VIC2_RASTER_2_EMU(a)    (IS_PAL ? VIC6569_RASTER_2_EMU(a) : VIC6567_RASTER_2_EMU(a))
+#define VIC2_RASTER_2_EMU(a)    (IS_PAL ? VIC6569_RASTER_2_EMU(a) : IS_6566 ? VIC6566_RASTER_2_EMU(a) : VIC6567_RASTER_2_EMU(a))
 #define VIC2_FIRSTCOLUMN        (IS_PAL ? VIC6569_FIRSTCOLUMN : VIC6567_FIRSTCOLUMN)
 #define VIC2_X_2_EMU(a)         (IS_PAL ? VIC6569_X_2_EMU(a) : VIC6567_X_2_EMU(a))
 
@@ -308,16 +287,20 @@ inline void mos6566_device::spr_ptr_access( int num )
 	m_spr_ptr[num] = read_videoram(SPRITE_ADDR(num)) << 6;
 }
 
-inline void mos6566_device::spr_ba(int num)
+inline void mos6566_device::spr_ba(int cycle, int first)
 {
-	if (BIT(m_spr_dma_on, num))
+	if (cycle > 11 && cycle < first)
+		return;
+
+	int state = ASSERT_LINE;
+
+	for (int i = 0; i < 8; i++)
 	{
-		set_ba(CLEAR_LINE);
+		if (BIT(m_spr_dma_on, i) && ((cycle - first - 2 * i + 2 * VIC2_CYCLESPERLINE) % VIC2_CYCLESPERLINE) < 5)
+			state = CLEAR_LINE;
 	}
-	else if (num > 1 && !BIT(m_spr_dma_on, num - 1))
-	{
-		set_ba(ASSERT_LINE);
-	}
+
+	set_ba(state);
 }
 
 // Fetch sprite data, increment data counter
@@ -342,6 +325,9 @@ inline void mos6566_device::display_if_bad_line()
 
 inline void mos6566_device::set_ba(int state)
 {
+	if (FAST_MODE)
+		state = ASSERT_LINE;
+
 	if (m_ba != state)
 	{
 		m_ba = state;
@@ -508,7 +494,7 @@ inline void mos6566_device::draw_background()
 				c = 0;
 				break;
 		}
-		m_bitmap.plot_box(m_graphic_x, VIC2_RASTER_2_EMU(m_rasterline), 8, 1, PALETTE_MOS[c]);
+		m_bitmap.plot_box(m_graphic_x, VIC2_RASTER_2_EMU(m_rasterline), 8, 1, m_palette[c]);
 	}
 }
 
@@ -519,7 +505,7 @@ inline void mos6566_device::draw_mono( uint16_t p, uint8_t c0, uint8_t c1 )
 
 	for (unsigned i = 0; i < 8; i++)
 	{
-		m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + 7 - i) = PALETTE_MOS[c[data & 1]];
+		m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + 7 - i) = m_palette[c[data & 1]];
 		m_fore_coll_buf[p + 7 - i] = data & 1;
 		data >>= 1;
 	}
@@ -530,21 +516,21 @@ inline void mos6566_device::draw_multi( uint16_t p, uint8_t c0, uint8_t c1, uint
 	uint8_t const c[4] = { c0, c1, c2, c3 };
 	uint8_t data = m_gfx_data;
 
-	m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + 7) = PALETTE_MOS[c[data & 3]];
+	m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + 7) = m_palette[c[data & 3]];
 	m_fore_coll_buf[p + 7] = data & 2;
-	m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + 6) = PALETTE_MOS[c[data & 3]];
+	m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + 6) = m_palette[c[data & 3]];
 	m_fore_coll_buf[p + 6] = data & 2; data >>= 2;
-	m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + 5) = PALETTE_MOS[c[data & 3]];
+	m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + 5) = m_palette[c[data & 3]];
 	m_fore_coll_buf[p + 5] = data & 2;
-	m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + 4) = PALETTE_MOS[c[data & 3]];
+	m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + 4) = m_palette[c[data & 3]];
 	m_fore_coll_buf[p + 4] = data & 2; data >>= 2;
-	m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + 3) = PALETTE_MOS[c[data & 3]];
+	m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + 3) = m_palette[c[data & 3]];
 	m_fore_coll_buf[p + 3] = data & 2;
-	m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + 2) = PALETTE_MOS[c[data & 3]];
+	m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + 2) = m_palette[c[data & 3]];
 	m_fore_coll_buf[p + 2] = data & 2; data >>= 2;
-	m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + 1) = PALETTE_MOS[c[data]];
+	m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + 1) = m_palette[c[data]];
 	m_fore_coll_buf[p + 1] = data & 2;
-	m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + 0) = PALETTE_MOS[c[data]];
+	m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + 0) = m_palette[c[data]];
 	m_fore_coll_buf[p + 0] = data & 2;
 }
 
@@ -577,6 +563,7 @@ mos6566_device::mos6566_device(const machine_config &mconfig, device_type type, 
 		m_write_aec(*this),
 		m_write_k(*this),
 		m_cpu(*this, finder_base::DUMMY_TAG),
+		m_palette(PALETTE_MOS),
 		m_phi0(1),
 		m_ba(ASSERT_LINE),
 		m_aec(ASSERT_LINE)
@@ -677,6 +664,8 @@ void mos6566_device::device_start()
 			m_expandx_multi[i] |= 0xa000;
 	}
 
+	m_fast_timer = timer_alloc(FUNC(mos6566_device::fast_changed), this);
+
 	// state saving
 	save_item(NAME(m_reg));
 
@@ -749,6 +738,9 @@ void mos6566_device::device_start()
 
 void mos6566_device::device_reset()
 {
+	if (IS_VICIIE)
+		m_cpu->set_unscaled_clock(clock() / 8, true);
+
 	memset(m_reg, 0, sizeof(m_reg));
 
 	for (auto & elem : m_mc)
@@ -778,6 +770,7 @@ void mos6566_device::device_reset()
 	m_color_data = 0;
 	m_last_char_data = 0;
 	m_vblanking = 0;
+	m_lp_latched_this_frame = false;
 	m_ml_index = 0;
 	m_rc = 0;
 	m_vc = 0;
@@ -834,6 +827,42 @@ void mos6566_device::device_reset()
 
 
 //-------------------------------------------------
+//  fast_changed -
+//-------------------------------------------------
+
+TIMER_CALLBACK_MEMBER(mos6566_device::fast_changed)
+{
+	m_cpu->set_unscaled_clock((clock() / 8) << param, !param);
+}
+
+
+//-------------------------------------------------
+//  cpu_access -
+//-------------------------------------------------
+
+void mos6566_device::cpu_access(int ioacc)
+{
+	if (!FAST_MODE)
+		return;
+
+	attoseconds_t const half = cycles_to_attotime(1).as_attoseconds() / 2;
+	attotime const now = machine().time();
+	attotime const vic = local_time();
+	attoseconds_t const delta = ((now >= vic) ? (now - vic).as_attoseconds() : -(vic - now).as_attoseconds()) + half / 2;
+	int64_t const halves = (delta >= 0) ? (delta / half) : -((half - 1 - delta) / half);
+
+	if (halves & 1)
+		return;
+
+	int const cycles_per_line = VIC2_CYCLESPERLINE;
+	int const cycle = int(((m_cycle - 1 + (halves >> 1)) % cycles_per_line + cycles_per_line) % cycles_per_line) + 1;
+
+	if (ioacc || (cycle >= 11 && cycle <= 15))
+		m_cpu->adjust_icount(-1);
+}
+
+
+//-------------------------------------------------
 //  execute_run -
 //-------------------------------------------------
 
@@ -848,6 +877,7 @@ void mos6566_device::execute_run()
 
 		set_aec(CLEAR_LINE);
 
+		int const cycle = m_cycle;
 		int i;
 		uint8_t mask;
 
@@ -887,6 +917,7 @@ void mos6566_device::execute_run()
 			{
 				// Vertical blank, reset counters
 				m_rasterline = m_vc_base = 0;
+				m_lp_latched_this_frame = false;
 				m_ref_cnt = 0xff;
 				m_vblanking = 0;
 
@@ -910,8 +941,6 @@ void mos6566_device::execute_run()
 			spr_data_access(3, 2);
 			display_if_bad_line();
 
-			spr_ba(5);
-
 			m_cycle++;
 			break;
 
@@ -930,8 +959,6 @@ void mos6566_device::execute_run()
 			spr_data_access(4, 2);
 			display_if_bad_line();
 
-			spr_ba(6);
-
 			m_cycle++;
 			break;
 
@@ -949,8 +976,6 @@ void mos6566_device::execute_run()
 			spr_data_access(5, 1);
 			spr_data_access(5, 2);
 			display_if_bad_line();
-
-			spr_ba(7);
 
 			m_cycle++;
 			break;
@@ -987,8 +1012,6 @@ void mos6566_device::execute_run()
 			spr_data_access(7, 1);
 			spr_data_access(7, 2);
 			display_if_bad_line();
-
-			set_ba(ASSERT_LINE);
 
 			m_cycle++;
 			break;
@@ -1183,6 +1206,8 @@ void mos6566_device::execute_run()
 		case 52:
 		case 53:
 		case 54:
+			bad_line_ba();
+
 			draw_graphics();
 			sample_border();
 			graphics_access();
@@ -1254,8 +1279,6 @@ void mos6566_device::execute_run()
 			idle_access();
 			display_if_bad_line();
 
-			spr_ba(0);
-
 			m_cycle++;
 			break;
 
@@ -1267,6 +1290,14 @@ void mos6566_device::execute_run()
 			display_if_bad_line();
 
 			m_cycle++;
+
+			if (IS_6566)
+			{
+				draw_background();
+				sample_border();
+
+				m_cycle++;
+			}
 			break;
 
 		// for NTSC 6567R8
@@ -1275,8 +1306,6 @@ void mos6566_device::execute_run()
 			sample_border();
 			idle_access();
 			display_if_bad_line();
-
-			spr_ba(1);
 
 			m_cycle++;
 			break;
@@ -1320,8 +1349,6 @@ void mos6566_device::execute_run()
 			spr_data_access(0, 2);
 			display_if_bad_line();
 
-			spr_ba(2);
-
 			m_cycle++;
 			break;
 
@@ -1336,24 +1363,24 @@ void mos6566_device::execute_run()
 
 				if (m_border_on_sample[0])
 					for (i = 0; i < 4; i++)
-						m_bitmap.plot_box(VIC2_X_2_EMU(i * 8), VIC2_RASTER_2_EMU(m_rasterline), 8, 1, PALETTE_MOS[m_border_color_sample[i]]);
+						m_bitmap.plot_box(VIC2_X_2_EMU(i * 8), VIC2_RASTER_2_EMU(m_rasterline), 8, 1, m_palette[m_border_color_sample[i]]);
 
 				if (m_border_on_sample[1])
-					m_bitmap.plot_box(VIC2_X_2_EMU(4 * 8), VIC2_RASTER_2_EMU(m_rasterline), 8, 1, PALETTE_MOS[m_border_color_sample[4]]);
+					m_bitmap.plot_box(VIC2_X_2_EMU(4 * 8), VIC2_RASTER_2_EMU(m_rasterline), 8, 1, m_palette[m_border_color_sample[4]]);
 
 				if (m_border_on_sample[2])
 					for (i = 5; i < 43; i++)
-						m_bitmap.plot_box(VIC2_X_2_EMU(i * 8), VIC2_RASTER_2_EMU(m_rasterline), 8, 1, PALETTE_MOS[m_border_color_sample[i]]);
+						m_bitmap.plot_box(VIC2_X_2_EMU(i * 8), VIC2_RASTER_2_EMU(m_rasterline), 8, 1, m_palette[m_border_color_sample[i]]);
 
 				if (m_border_on_sample[3])
-					m_bitmap.plot_box(VIC2_X_2_EMU(43 * 8), VIC2_RASTER_2_EMU(m_rasterline), 8, 1, PALETTE_MOS[m_border_color_sample[43]]);
+					m_bitmap.plot_box(VIC2_X_2_EMU(43 * 8), VIC2_RASTER_2_EMU(m_rasterline), 8, 1, m_palette[m_border_color_sample[43]]);
 
 				if (m_border_on_sample[4])
 				{
 					for (i = 44; i < 48; i++)
-						m_bitmap.plot_box(VIC2_X_2_EMU(i * 8), VIC2_RASTER_2_EMU(m_rasterline), 8, 1, PALETTE_MOS[m_border_color_sample[i]]);
+						m_bitmap.plot_box(VIC2_X_2_EMU(i * 8), VIC2_RASTER_2_EMU(m_rasterline), 8, 1, m_palette[m_border_color_sample[i]]);
 					for (i = 48; i < 53; i++)
-						m_bitmap.plot_box(VIC2_X_2_EMU(i * 8), VIC2_RASTER_2_EMU(m_rasterline), 8, 1, PALETTE_MOS[m_border_color_sample[47]]);
+						m_bitmap.plot_box(VIC2_X_2_EMU(i * 8), VIC2_RASTER_2_EMU(m_rasterline), 8, 1, m_palette[m_border_color_sample[47]]);
 				}
 			}
 
@@ -1369,8 +1396,6 @@ void mos6566_device::execute_run()
 			spr_data_access(1, 1);
 			spr_data_access(1, 2);
 			display_if_bad_line();
-
-			spr_ba(3);
 
 			m_cycle++;
 			break;
@@ -1396,11 +1421,14 @@ void mos6566_device::execute_run()
 				if (SCREENON && (m_rasterline == m_dy_start))
 					m_ud_border_on = 0;
 
-			spr_ba(4);
-
 			// Last cycle
 			m_cycle = 1;
 		}
+
+		if (IS_6566)
+			spr_ba((cycle > 59) ? (cycle - 1) : cycle, 56);
+		else
+			spr_ba(cycle, 57);
 
 		m_phi0 = 1;
 		set_aec(BIT(m_aec_delay, 2));
@@ -1431,6 +1459,7 @@ void mos6569_device::execute_run()
 
 		set_aec(CLEAR_LINE);
 
+		int const cycle = m_cycle;
 		int i;
 		uint8_t mask;
 
@@ -1466,12 +1495,11 @@ void mos6569_device::execute_run()
 
 		// Sprite 3
 		case 2:
-			spr_ba(5);
-
 			if (m_vblanking)
 			{
 				// Vertical blank, reset counters
 				m_rasterline = m_vc_base = 0;
+				m_lp_latched_this_frame = false;
 				m_ref_cnt = 0xff;
 				m_vblanking = 0;
 
@@ -1509,8 +1537,6 @@ void mos6569_device::execute_run()
 
 		// Sprite 4
 		case 4:
-			spr_ba(6);
-
 			spr_data_access(4, 1);
 			spr_data_access(4, 2);
 			display_if_bad_line();
@@ -1529,8 +1555,6 @@ void mos6569_device::execute_run()
 
 		// Sprite 5
 		case 6:
-			spr_ba(7);
-
 			spr_data_access(5, 1);
 			spr_data_access(5, 2);
 			display_if_bad_line();
@@ -1570,8 +1594,6 @@ void mos6569_device::execute_run()
 			spr_data_access(7, 1);
 			spr_data_access(7, 2);
 			display_if_bad_line();
-
-			set_ba(ASSERT_LINE);
 
 			m_cycle++;
 			break;
@@ -1795,8 +1817,6 @@ void mos6569_device::execute_run()
 
 			check_sprite_dma();
 
-			spr_ba(0);
-
 			m_cycle++;
 			break;
 
@@ -1819,8 +1839,6 @@ void mos6569_device::execute_run()
 
 		// Check border, sprites
 		case 57:
-			spr_ba(1);
-
 			if (COLUMNS40)
 				m_border_on = 1;
 
@@ -1878,8 +1896,6 @@ void mos6569_device::execute_run()
 
 		// Sprite 0
 		case 59:
-			spr_ba(2);
-
 			draw_background();
 			sample_border();
 			spr_data_access(0, 1);
@@ -1900,24 +1916,24 @@ void mos6569_device::execute_run()
 
 				if (m_border_on_sample[0])
 					for (i = 0; i < 4; i++)
-						m_bitmap.plot_box(VIC2_X_2_EMU(i * 8), VIC2_RASTER_2_EMU(m_rasterline), 8, 1, PALETTE_MOS[m_border_color_sample[i]]);
+						m_bitmap.plot_box(VIC2_X_2_EMU(i * 8), VIC2_RASTER_2_EMU(m_rasterline), 8, 1, m_palette[m_border_color_sample[i]]);
 
 				if (m_border_on_sample[1])
-					m_bitmap.plot_box(VIC2_X_2_EMU(4 * 8), VIC2_RASTER_2_EMU(m_rasterline), 8, 1, PALETTE_MOS[m_border_color_sample[4]]);
+					m_bitmap.plot_box(VIC2_X_2_EMU(4 * 8), VIC2_RASTER_2_EMU(m_rasterline), 8, 1, m_palette[m_border_color_sample[4]]);
 
 				if (m_border_on_sample[2])
 					for (i = 5; i < 43; i++)
-						m_bitmap.plot_box(VIC2_X_2_EMU(i * 8), VIC2_RASTER_2_EMU(m_rasterline), 8, 1, PALETTE_MOS[m_border_color_sample[i]]);
+						m_bitmap.plot_box(VIC2_X_2_EMU(i * 8), VIC2_RASTER_2_EMU(m_rasterline), 8, 1, m_palette[m_border_color_sample[i]]);
 
 				if (m_border_on_sample[3])
-					m_bitmap.plot_box(VIC2_X_2_EMU(43 * 8), VIC2_RASTER_2_EMU(m_rasterline), 8, 1, PALETTE_MOS[m_border_color_sample[43]]);
+					m_bitmap.plot_box(VIC2_X_2_EMU(43 * 8), VIC2_RASTER_2_EMU(m_rasterline), 8, 1, m_palette[m_border_color_sample[43]]);
 
 				if (m_border_on_sample[4])
 				{
 					for (i = 44; i < 48; i++)
-						m_bitmap.plot_box(VIC2_X_2_EMU(i * 8), VIC2_RASTER_2_EMU(m_rasterline), 8, 1, PALETTE_MOS[m_border_color_sample[i]]);
+						m_bitmap.plot_box(VIC2_X_2_EMU(i * 8), VIC2_RASTER_2_EMU(m_rasterline), 8, 1, m_palette[m_border_color_sample[i]]);
 					for (i = 48; i < 51; i++)
-						m_bitmap.plot_box(VIC2_X_2_EMU(i * 8), VIC2_RASTER_2_EMU(m_rasterline), 8, 1, PALETTE_MOS[m_border_color_sample[47]]);
+						m_bitmap.plot_box(VIC2_X_2_EMU(i * 8), VIC2_RASTER_2_EMU(m_rasterline), 8, 1, m_palette[m_border_color_sample[47]]);
 				}
 			}
 
@@ -1930,8 +1946,6 @@ void mos6569_device::execute_run()
 
 		// Sprite 1
 		case 61:
-			spr_ba(3);
-
 			spr_data_access(1, 1);
 			spr_data_access(1, 2);
 			display_if_bad_line();
@@ -1950,8 +1964,6 @@ void mos6569_device::execute_run()
 
 		// Sprite 2
 		case 63:
-			spr_ba(4);
-
 			spr_data_access(2, 1);
 			spr_data_access(2, 2);
 			display_if_bad_line();
@@ -1965,6 +1977,8 @@ void mos6569_device::execute_run()
 			// Last cycle
 			m_cycle = 1;
 		}
+
+		spr_ba(cycle, 55);
 
 		m_phi0 = 1;
 		set_aec(BIT(m_aec_delay, 2));
@@ -2044,21 +2058,21 @@ void mos6566_device::draw_graphics()
 			case 5:
 			case 6:
 			case 7:
-				m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + 7) = PALETTE_MOS[0];
+				m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + 7) = m_palette[0];
 				m_fore_coll_buf[p + 7] = 0;
-				m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + 6) = PALETTE_MOS[0];
+				m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + 6) = m_palette[0];
 				m_fore_coll_buf[p + 6] = 0;
-				m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + 5) = PALETTE_MOS[0];
+				m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + 5) = m_palette[0];
 				m_fore_coll_buf[p + 5] = 0;
-				m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + 4) = PALETTE_MOS[0];
+				m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + 4) = m_palette[0];
 				m_fore_coll_buf[p + 4] = 0;
-				m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + 3) = PALETTE_MOS[0];
+				m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + 3) = m_palette[0];
 				m_fore_coll_buf[p + 3] = 0;
-				m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + 2) = PALETTE_MOS[0];
+				m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + 2) = m_palette[0];
 				m_fore_coll_buf[p + 2] = 0;
-				m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + 1) = PALETTE_MOS[0];
+				m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + 1) = m_palette[0];
 				m_fore_coll_buf[p + 1] = 0;
-				m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + 0) = PALETTE_MOS[0];
+				m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + 0) = m_palette[0];
 				m_fore_coll_buf[p + 0] = 0;
 				break;
 		}
@@ -2133,12 +2147,12 @@ void mos6566_device::draw_sprites()
 							if (SPRITE_PRIORITY(snum))
 							{
 								if (m_fore_coll_buf[p + i] == 0)
-									m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + i) = PALETTE_MOS[col];
+									m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + i) = m_palette[col];
 								m_spr_coll_buf[p + i] = sbit;
 							}
 							else
 							{
-								m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + i) = PALETTE_MOS[col];
+								m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + i) = m_palette[col];
 								m_spr_coll_buf[p + i] = sbit;
 							}
 						}
@@ -2181,12 +2195,12 @@ void mos6566_device::draw_sprites()
 							if (SPRITE_PRIORITY(snum))
 							{
 								if (m_fore_coll_buf[p + i] == 0)
-									m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + i) = PALETTE_MOS[col];
+									m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + i) = m_palette[col];
 								m_spr_coll_buf[p + i] = sbit;
 							}
 							else
 							{
-								m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + i) = PALETTE_MOS[col];
+								m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + i) = m_palette[col];
 								m_spr_coll_buf[p + i] = sbit;
 							}
 						}
@@ -2212,12 +2226,12 @@ void mos6566_device::draw_sprites()
 								if (SPRITE_PRIORITY(snum))
 								{
 									if (m_fore_coll_buf[p + i] == 0)
-										m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + i) = PALETTE_MOS[color];
+										m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + i) = m_palette[color];
 									m_spr_coll_buf[p + i] = sbit;
 								}
 								else
 								{
-									m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + i) = PALETTE_MOS[color];
+									m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + i) = m_palette[color];
 									m_spr_coll_buf[p + i] = sbit;
 								}
 							}
@@ -2238,12 +2252,12 @@ void mos6566_device::draw_sprites()
 								if (SPRITE_PRIORITY(snum))
 								{
 									if (m_fore_coll_buf[p + i] == 0)
-										m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + i) = PALETTE_MOS[color];
+										m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + i) = m_palette[color];
 									m_spr_coll_buf[p + i] = sbit;
 								}
 								else
 								{
-									m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + i) = PALETTE_MOS[color];
+									m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + i) = m_palette[color];
 									m_spr_coll_buf[p + i] = sbit;
 								}
 							}
@@ -2295,12 +2309,12 @@ void mos6566_device::draw_sprites()
 							if (SPRITE_PRIORITY(snum))
 							{
 								if (m_fore_coll_buf[p + i] == 0)
-									m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + i) = PALETTE_MOS[col];
+									m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + i) = m_palette[col];
 								m_spr_coll_buf[p + i] = sbit;
 							}
 							else
 							{
-								m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + i) = PALETTE_MOS[col];
+								m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + i) = m_palette[col];
 								m_spr_coll_buf[p + i] = sbit;
 							}
 						}
@@ -2325,12 +2339,12 @@ void mos6566_device::draw_sprites()
 								if (SPRITE_PRIORITY(snum))
 								{
 									if (m_fore_coll_buf[p + i] == 0)
-										m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + i) = PALETTE_MOS[color];
+										m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + i) = m_palette[color];
 									m_spr_coll_buf[p + i] = sbit;
 								}
 								else
 								{
-									m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + i) = PALETTE_MOS[color];
+									m_bitmap.pix(VIC2_RASTER_2_EMU(m_rasterline), p + i) = m_palette[color];
 									m_spr_coll_buf[p + i] = sbit;
 								}
 							}
@@ -2367,7 +2381,7 @@ void mos6566_device::draw_sprites()
 
 uint32_t mos6566_device::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect)
 {
-	bitmap.fill(PALETTE_MOS[0], cliprect);
+	bitmap.fill(m_palette[m_on ? 0 : BACKGROUNDCOLOR], cliprect);
 
 	if (m_on)
 		copybitmap(bitmap, m_bitmap, 0, 0, 0, 0, cliprect);
@@ -2721,12 +2735,16 @@ void mos6566_device::write(offs_t offset, uint8_t data)
 		{
 			if (BIT(m_reg[offset], 0) != BIT(data, 0))
 			{
-				m_cpu->set_unscaled_clock((clock() / 8) << BIT(data, 0));
+				m_cpu->abort_timeslice();
+				m_fast_timer->adjust(attotime::zero, BIT(data, 0));
 			}
 
 			m_reg[offset] = data | 0xfc;
 
 			m_on = !BIT(data, 0);
+
+			if (BIT(data, 0))
+				set_ba(ASSERT_LINE);
 		}
 		break;
 
@@ -2762,13 +2780,71 @@ void mos6566_device::write(offs_t offset, uint8_t data)
 
 void mos6566_device::lp_w(int state)
 {
-	if (m_lp && !state && !(m_reg[REGISTER_IRQ] & IRQ_LP))
+	if (m_lp && !state && !m_lp_latched_this_frame)
 	{
 		m_reg[REGISTER_LPX] = m_raster_x >> 1;
 		m_reg[REGISTER_LPY] = m_rasterline;
+		m_lp_latched_this_frame = true;
 
 		set_interrupt(IRQ_LP);
 	}
 
 	m_lp = state;
+}
+
+
+//-------------------------------------------------
+//  time_until_pos - time until the chip's own
+//  raster_x/rasterline counters (the ones lp_w
+//  latches into LPX/LPY) reach the given position
+//-------------------------------------------------
+
+attotime mos6566_device::time_until_pos(int rasterline, int raster_x) const
+{
+	// m_raster_x holds 0x004, 0x00c, ..., 0x1f4 (0x1fc is skipped by the
+	// wraparound check in execute_run()), so it free-runs on a 63-value
+	// cycle regardless of variant - NOT 64, and NOT tied to cycles_per_line
+	// (65 on NTSC, 63 on PAL).
+	int constexpr raster_x_period = ((0x1f4 - 0x004) / 8) + 1;
+
+	int const cycles_per_line = VIC2_CYCLESPERLINE;
+
+	int lines_to_advance = (rasterline - m_rasterline + VIC2_LINES) % VIC2_LINES;
+	if (lines_to_advance == 0)
+		lines_to_advance = VIC2_LINES;
+
+	u64 cycles_to_line_start = u64(cycles_per_line - m_cycle + 1) + u64(lines_to_advance - 1) * cycles_per_line;
+
+	int const current_x_index = (m_raster_x / 8) % raster_x_period;
+	int const target_x_index = ((raster_x / 8) % raster_x_period + raster_x_period) % raster_x_period;
+	int const index_at_line_start = (current_x_index + int(cycles_to_line_start % raster_x_period)) % raster_x_period;
+
+	// raster_x_period <= cycles_per_line always, so the soonest match is
+	// always within the target line itself.
+	int const delta = (target_x_index - index_at_line_start + raster_x_period) % raster_x_period;
+
+	return clocks_to_attotime(cycles_to_line_start + delta);
+}
+
+
+//-------------------------------------------------
+//  time_until_lightpen_pos - time_until_pos(),
+//  taking a crosshair position (0-255 across the
+//  visible picture, matching vcs_lightpen_device's
+//  LIGHTX/LIGHTY convention) instead of raw chip
+//  coordinates
+//-------------------------------------------------
+
+attotime mos6566_device::time_until_lightpen_pos(int x255, int y255) const
+{
+	int const visible_lines = IS_PAL ? VIC6569_VISIBLELINES : VIC6567_VISIBLELINES;
+	int const target_rasterline = (VIC2_FIRST_DISP_LINE + (y255 * visible_lines) / 256) % VIC2_LINES;
+
+	int const columns_total = IS_PAL ? VIC6569_COLUMNS : VIC6567_COLUMNS;
+	int const visible_columns = IS_PAL ? VIC6569_VISIBLECOLUMNS : VIC6567_VISIBLECOLUMNS;
+
+	int constexpr BITMAP_X_TO_RASTER_X = 17; // hand-tuned
+	int const target_raster_x = ((x255 * visible_columns) / 256 + BITMAP_X_TO_RASTER_X + columns_total) % columns_total;
+
+	return time_until_pos(target_rasterline, target_raster_x);
 }

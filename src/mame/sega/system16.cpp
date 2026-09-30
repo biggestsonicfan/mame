@@ -2910,6 +2910,14 @@ ROM_START( passht4b )
 	ROM_REGION( 0x20000, "soundcpu", 0 )
 	ROM_LOAD( "pas4p.1",  0x00000, 0x08000, CRC(e60fb017) SHA1(21298036eab55c74427f1c2e3a9623d41bca4849) )
 	ROM_LOAD( "pas4p.2",  0x10000, 0x10000, CRC(092e016e) SHA1(713638749efa9dce19c547b84308236110bc85fe) )
+
+	ROM_REGION( 0x120, "proms", 0 )
+	ROM_LOAD( "n82s129n.bin", 0x000, 0x100, CRC(88962e80) SHA1(ebf3d57d53fcba727cf20e4bb26f12934f7d1bc7) )
+	ROM_LOAD( "n82s123n.bin", 0x100, 0x020, CRC(280981db) SHA1(796507f073a629632c2f65fc2ac2cdf0efc4b6a7) )
+
+	ROM_REGION( 0x400, "plds", ROMREGION_ERASE00 )
+	ROM_LOAD( "pal20l8acns.ic13",     0x000, 0x144, CRC(c15cb017) SHA1(b0b5d7a5edf01386f05bd76dc887599683e221c7) )
+	ROM_LOAD( "tibpal16l8-25cn.ic51", 0x200, 0x104, CRC(a633aa10) SHA1(9026ae337274626e41c42fc3175c5c8f9258ebc6) )
 ROM_END
 
 ROM_START( wb3bbl )
@@ -4144,11 +4152,11 @@ void segas1x_bootleg_state::init_bayrouteb1()
 
 	uint16_t *ROM = &memregion("maincpu")->as_u16();
 
-	// patch interrupt vector
+	// HACK: patch interrupt vector
 	ROM[0x0070/2] = 0x000b;
 	ROM[0x0072/2] = 0xf000;
 
-	// patch check for code in RAM
+	// HACK: patch check for code in RAM
 	m_decrypted_opcodes[0x107e/2] = 0x48e7;
 	m_decrypted_opcodes[0x1080/2] = 0x000b;
 	m_decrypted_opcodes[0x1082/2] = 0xf000;

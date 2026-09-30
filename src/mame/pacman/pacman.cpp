@@ -338,10 +338,7 @@ Boards:
 ****************************************************************************/
 
 #include "emu.h"
-
 #include "pacman.h"
-#include "jumpshot.h"
-#include "pacplus.h"
 
 #include "cpu/s2650/s2650.h"
 #include "cpu/z80/z80.h"
@@ -5493,6 +5490,26 @@ ROM_START( baracuda )
 	ROM_LOAD( "82s126.3m", 0x0100, 0x0100, CRC(77245b66) SHA1(0c4d0bee858b97632411c440bea6948a74759746) ) // Timing - not used
 ROM_END
 
+ROM_START( pacmanvcc ) // found on original PCB. All labels handwritten
+	ROM_REGION( 0x10000, "maincpu", 0 )
+	ROM_LOAD( "pac4_6e_vcc.6e",    0x0000, 0x1000, CRC(532bd09f) SHA1(ed362ae0b38a00747128046a14d68d2a676953ae) )
+	ROM_LOAD( "pac4_6f_vcc.6f",    0x1000, 0x1000, CRC(b9062f57) SHA1(cdfb2264fc5874cd18848fde936ea1314ce74cba) )
+	ROM_LOAD( "pac4_6h_vcc.6h",    0x2000, 0x1000, CRC(519b3c57) SHA1(cc03d67035f9d590fadef899d9a2d978a4978b39) )
+	ROM_LOAD( "pac4_6j_vcc.6j",    0x3000, 0x1000, CRC(8c2b0871) SHA1(3cb46cea10bbe7a77d90b28228128f6b558ca833) )
+
+	ROM_REGION( 0x2000, "gfx1", 0 )
+	ROM_LOAD( "pacman_5e_vcc.5e",    0x0000, 0x1000, CRC(0c944964) SHA1(06ef227747a440831c9a3a613b76693d52a2f0a9) )
+	ROM_LOAD( "pacman_5f_vcc.5f",    0x1000, 0x1000, CRC(958fedf9) SHA1(4a937ac02216ea8c96477d4a15522070507fb599) )
+
+	ROM_REGION( 0x0120, "proms", 0 )
+	ROM_LOAD( "82s123.7f",    0x0000, 0x0020, CRC(2fc650bd) SHA1(8d0268dee78e47c712202b0ec4f1f51109b1f2a5) )
+	ROM_LOAD( "82s126.4a",    0x0020, 0x0100, CRC(3eb3a8e4) SHA1(19097b5f60d1030f8b82d9f1d3a241f93e5c75d6) )
+
+	ROM_REGION( 0x0200, "namco", 0 ) // Sound PROMs
+	ROM_LOAD( "82s126.1m",    0x0000, 0x0100, CRC(a9cc86bf) SHA1(bbcec0570aeceb582ff8238a4bc8546a23430081) )
+	ROM_LOAD( "82s126.3m",    0x0100, 0x0100, CRC(77245b66) SHA1(0c4d0bee858b97632411c440bea6948a74759746) ) // Timing - not used
+ROM_END
+
 ROM_START( popeyeman )
 	ROM_REGION( 0x10000, "maincpu", 0 )
 	ROM_LOAD( "pop1.6e",      0x0000, 0x0800, CRC(9d027c4a) SHA1(88e094880057451a75cdc2ce9477403021813982) )
@@ -8699,7 +8716,7 @@ void pacman_state::init_mspacman()
 		DROM[0xb000+i] = ROM[0x3000+i]; // mirror of pacman.6j
 	}
 
-	// install patches into decrypted bank
+	// HACK: install patches into decrypted bank
 	mspacman_install_patches(DROM);
 
 	// mirror Pac-Man ROMs into upper addresses of normal bank
@@ -8744,14 +8761,66 @@ void alibaba_state::init_alibaba()
 	}
 }
 
+inline uint8_t pacplus_decrypt(const uint8_t (&swap_xor_table)[6][9], const int (&picktable)[32], int addr, uint8_t e)
+{
+	/* pick method from bits 0 2 5 7 9 of the address */
+	uint32_t method = picktable[bitswap<5>(addr, 9, 7, 5, 2, 0)];
+
+	/* switch method if bit 11 of the address is set */
+	method ^= BIT(addr, 11);
+
+	auto &tbl = swap_xor_table[method];
+	return bitswap<8>(e,tbl[0],tbl[1],tbl[2],tbl[3],tbl[4],tbl[5],tbl[6],tbl[7]) ^ tbl[8];
+}
+
 void pacman_state::init_pacplus()
 {
-	pacplus_decode();
+	static const uint8_t swap_xor_table[6][9] =
+	{
+		{ 7,6,5,4,3,2,1,0, 0x00 },
+		{ 7,6,5,4,3,2,1,0, 0x28 },
+		{ 6,1,3,2,5,7,0,4, 0x96 },
+		{ 6,1,5,2,3,7,0,4, 0xbe },
+		{ 0,3,7,6,4,2,1,5, 0xd5 },
+		{ 0,3,4,6,7,2,1,5, 0xdd }
+	};
+	static const int picktable[32] =
+	{
+		0,2,4,2,4,0,4,2,2,0,2,2,4,0,4,2,
+		2,2,4,0,4,2,4,0,0,4,0,4,4,2,4,2
+	};
+
+	/* CPU ROMs */
+	uint8_t *ROM = memregion("maincpu")->base();
+	for (int i = 0; i < 0x4000; i++)
+	{
+		ROM[i] = pacplus_decrypt(swap_xor_table, picktable, i, ROM[i]);
+	}
 }
 
 void pacman_state::init_jumpshot()
 {
-	jumpshot_decode();
+	static const uint8_t swap_xor_table[6][9] =
+	{
+		{ 7,6,5,4,3,2,1,0, 0x00 },
+		{ 7,6,3,4,5,2,1,0, 0x20 },
+		{ 5,0,4,3,7,1,2,6, 0xa4 },
+		{ 5,0,4,3,7,1,2,6, 0x8c },
+		{ 2,3,1,7,4,6,0,5, 0x6e },
+		{ 2,3,4,7,1,6,0,5, 0x4e }
+	};
+	static const int picktable[32] =
+	{
+		0,2,4,4,4,2,0,2,2,0,2,4,4,2,0,2,
+		5,3,5,1,5,3,5,3,1,5,1,5,5,3,5,3
+	};
+
+	/* CPU ROMs */
+	uint8_t *ROM = memregion("maincpu")->base();
+	for (int i = 0; i < 0x4000; i++)
+	{
+		ROM[i] = pacplus_decrypt(swap_xor_table, picktable, i, ROM[i]);
+	}
 }
 
 void pacman_state::init_drivfrcp()
@@ -8800,7 +8869,7 @@ void pacman_state::init_porky()
 
 void pacman_state::init_rocktrv2()
 {
-	// hack to pass the rom check for the bad rom
+	// HACK: patches to pass the rom check for the bad ROM
 	uint8_t *ROM = memregion("maincpu")->base();
 
 	ROM[0x7ffe] = 0xa7;
@@ -9032,6 +9101,7 @@ GAME( 1981, bucanera,  puckman,  pacman,   pacman,   pacman_state,  empty_init, 
 GAME( 1981, hangly,    puckman,  pacman,   pacman,   pacman_state,  empty_init,    ROT90,  "hack (Igleck)",                     "Hangly-Man (set 1)",                                       MACHINE_SUPPORTS_SAVE )
 GAME( 1981, hangly2,   puckman,  pacman,   pacman,   pacman_state,  empty_init,    ROT90,  "hack (Igleck)",                     "Hangly-Man (set 2)",                                       MACHINE_SUPPORTS_SAVE )
 GAME( 1981, hangly3,   puckman,  pacman,   pacman,   pacman_state,  empty_init,    ROT90,  "hack (Igleck)",                     "Hangly-Man (set 3)",                                       MACHINE_SUPPORTS_SAVE )
+GAME( 1982, pacmanvcc, puckman,  pacman,   pacman,   pacman_state,  empty_init,    ROT90,  "hack (VCC)",                        "Pac-Man (VCC hack)",                                       MACHINE_SUPPORTS_SAVE )
 GAME( 1981, baracuda,  puckman,  pacman,   pacman,   pacman_state,  empty_init,    ROT90,  "hack (Coinex)",                     "Barracuda",                                                MACHINE_SUPPORTS_SAVE )
 GAME( 1981, popeyeman, puckman,  pacman,   pacman,   pacman_state,  empty_init,    ROT90,  "hack",                              "Popeye-Man",                                               MACHINE_SUPPORTS_SAVE )
 GAME( 1980, pacuman,   puckman,  pacman,   pacuman,  pacman_state,  empty_init,    ROT90,  "bootleg (Recreativos Franco S.A.)", "Pacu-Man (Spanish bootleg of Puck Man)",                   MACHINE_SUPPORTS_SAVE ) // common bootleg in Spain, code is shifted a bit compared to the Puck Man sets. Title & Manufacturer info from cabinet/PCB, not displayed ingame
