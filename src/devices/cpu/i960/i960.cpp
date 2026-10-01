@@ -1572,6 +1572,24 @@ void i960_cpu_device::execute_op(uint32_t opcode)
 
 		case 0x65:
 			switch((opcode >> 7) & 0xf) {
+			case 0x0: // modify
+				m_icount -= 7;
+				t1 = get_1_ri(opcode);
+				t2 = get_2_ri(opcode);
+				set_ri(opcode, (t2 & t1) | (m_r[(opcode>>19) & 0x1f] & ~t1));
+				break;
+
+			case 0x1: // extract
+				// the field is len (src2) bits at bitpos (src1) of src/dst, moved down to bit 0
+				m_icount -= 7;
+				t1 = get_1_ri(opcode);
+				t2 = get_2_ri(opcode);
+				t1 = t1 < 32 ? m_r[(opcode>>19) & 0x1f] >> t1 : 0;
+				if (t2 < 32)
+					t1 &= (1U << t2) - 1;
+				set_ri(opcode, t1);
+				break;
+
 			case 0x4: // modtc
 				// The trace controls are kept so that a monitor that sets them (Intel's
 				// NINDY, on its way into a user program) reads back what it wrote. MAME
