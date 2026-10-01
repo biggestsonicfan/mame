@@ -314,28 +314,32 @@ void qt960_state::dma_w(offs_t offset, uint8_t data)
 //  Memory Map
 //**************************************************************************
 
+// Every region is BURST: the QT960's bus has no FIFO, so a multi-word access (ldl, ldt,
+// ldq, stl, stt, stq) moves on a word for each word, as on the board. MAME's i960 holds
+// the address still without the flag (for Model 2's FIFOs): NINDY's "dd" then showed 0
+// for the high word of every pair, because its stl wrote both words to one address.
 void qt960_state::mem_map(address_map &map)
 {
 	// EPROM at 0x00000000 (A31-27 = 00000)
-	map(0x00000000, 0x0001ffff).rom().region("maincpu", 0);
+	map(0x00000000, 0x0001ffff).rom().region("maincpu", 0).flags(i960_cpu_device::BURST);
 
 	// Flash at 0x08000000 (A31-27 = 00001) - writable for downloads
-	map(0x08000000, 0x0801ffff).ram();
+	map(0x08000000, 0x0801ffff).ram().flags(i960_cpu_device::BURST);
 
 	// SRAM at 0x10000000 (A31-27 = 00010)
-	map(0x10000000, 0x101fffff).ram().share("ram");
+	map(0x10000000, 0x101fffff).ram().share("ram").flags(i960_cpu_device::BURST);
 
 	// 82380 at 0x18000000 (A31-27 = 00011)
-	map(0x18000000, 0x1801ffff).rw(FUNC(qt960_state::dma_r), FUNC(qt960_state::dma_w));
+	map(0x18000000, 0x1801ffff).rw(FUNC(qt960_state::dma_r), FUNC(qt960_state::dma_w)).flags(i960_cpu_device::BURST);
 
 	// 82510 Serial at 0x20000000 (A31-27 = 00100)
-	map(0x20000000, 0x2000001f).rw(FUNC(qt960_state::serial_r), FUNC(qt960_state::serial_w));
+	map(0x20000000, 0x2000001f).rw(FUNC(qt960_state::serial_r), FUNC(qt960_state::serial_w)).flags(i960_cpu_device::BURST);
 
 	// CSR at 0x28000000 (A31-27 = 00101)
-	map(0x28000000, 0x2800001f).rw(FUNC(qt960_state::csr_r), FUNC(qt960_state::csr_w));
+	map(0x28000000, 0x2800001f).rw(FUNC(qt960_state::csr_r), FUNC(qt960_state::csr_w)).flags(i960_cpu_device::BURST);
 
 	// User Space 0 at 0x30000000 (A31-27 = 00110) - stub as RAM
-	map(0x30000000, 0x3001ffff).ram();
+	map(0x30000000, 0x3001ffff).ram().flags(i960_cpu_device::BURST);
 }
 
 
