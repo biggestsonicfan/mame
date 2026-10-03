@@ -1398,25 +1398,65 @@ void system_time::full_time::set(struct tm &t)
 
 running_machine * running_machine::emscripten_running_machine;
 
+namespace {
+
+double emscripten_last_call;            // when the main loop last ran (ms), 0 to start over
+double emscripten_last_work;            // how long its last call ran the machine (ms)
+attotime emscripten_last_step;          // and how much emulated time that was
+
+} // anonymous namespace
+
 void running_machine::emscripten_main_loop()
 {
 	running_machine *machine = emscripten_running_machine;
 
 	auto profile = g_profiler.start(PROFILER_EXTRA);
 
+	// The browser calls this once per display refresh, and the main thread can't sleep, so
+	// this is where the machine is throttled: each call runs as much emulated time as real
+	// time has passed since the last one (video_manager::update_throttle doesn't wait), at
+	// any refresh rate.
+	double const now = emscripten_get_now();
+	double const elapsed = emscripten_last_call ? now - emscripten_last_call : 1000.0 / 60;
+	emscripten_last_call = now;
+
 	// execute CPUs if not paused
 	if (!machine->m_paused)
 	{
 		device_scheduler * scheduler;
 		scheduler = &(machine->scheduler());
+		video_manager &video = machine->video();
 
-		// Emscripten will call this function at 60Hz, so step the simulation
-		// forward for the amount of time that has passed since the last frame
-		const attotime frametime(0,HZ_TO_ATTOSECONDS(60));
-		const attotime stoptime(scheduler->time() + frametime);
-
-		while (!machine->m_paused && !machine->scheduled_event_pending() && scheduler->time() < stoptime)
+		const attotime frametime(0, HZ_TO_ATTOSECONDS(60));
+		attotime stoptime;
+		double budget = 0;
+		if (video.throttled() && !video.fastforward())
 		{
+			// a tenth of a second at most, after a stall or with the tab in the background;
+			// a machine slower than real time gets a 60th per call, so every frame it makes is
+			// shown rather than one in several
+			attotime step = attotime::from_double(std::min(elapsed, 100.0) / 1000 * video.speed_factor() / 1000);
+			if (emscripten_last_work > emscripten_last_step.as_double() * 1000)
+				step = std::min(step, frametime);
+			stoptime = scheduler->time() + step;
+			emscripten_last_step = step;
+		}
+		else
+		{
+			// unthrottled: a 60th of emulated time at a time, for a display frame of real time
+			stoptime = scheduler->time() + frametime;
+			budget = 1000.0 / 60;
+			emscripten_last_step = attotime::zero;
+		}
+
+		while (!machine->m_paused && !machine->scheduled_event_pending())
+		{
+			if (scheduler->time() >= stoptime)
+			{
+				if (emscripten_get_now() - now >= budget)
+					break;
+				stoptime += frametime;
+			}
 			scheduler->timeslice();
 			// handle save/load
 			if (machine->m_saveload_schedule != saveload_schedule::NONE)
@@ -1425,10 +1465,14 @@ void running_machine::emscripten_main_loop()
 				break;
 			}
 		}
+		emscripten_last_work = emscripten_get_now() - now;
 	}
 	// otherwise, just pump video updates through
 	else
+	{
 		machine->m_video->frame_update();
+		emscripten_last_work = 0;
+	}
 
 	// cancel the emscripten loop if the system has been told to exit
 	if (machine->exit_pending())
@@ -1440,6 +1484,8 @@ void running_machine::emscripten_main_loop()
 void running_machine::emscripten_set_running_machine(running_machine *machine)
 {
 	emscripten_running_machine = machine;
+	emscripten_last_call = emscripten_last_work = 0;
+	emscripten_last_step = attotime::zero;
 	EM_ASM (
 		JSMESS.running = true;
 	);
