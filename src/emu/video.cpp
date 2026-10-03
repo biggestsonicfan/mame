@@ -712,6 +712,12 @@ void video_manager::update_throttle(attotime emutime)
 
 */
 
+#if defined(__EMSCRIPTEN__)
+	// the browser's main thread can't sleep, so waiting here would only spin; the main loop
+	// runs the machine at the pace of real time instead (running_machine::emscripten_main_loop)
+	return;
+#endif
+
 	// outer scope so we can break out in case of a resync
 	while (1)
 	{
