@@ -17,6 +17,7 @@
 #include "endianness.h"
 
 #include <algorithm>
+#include <cfenv>
 #include <cstdio>
 #include <locale>
 #include <sstream>
@@ -1253,6 +1254,8 @@ void adsp21062_device::execute_run()
 	}
 	else
 	{
+		// idea 548 experiment: the board runs mode1 TRUNCATE (STF: mode1=0x18000)
+		struct rz_guard { int o; rz_guard() : o(fegetround()) { fesetround(FE_TOWARDZERO); } ~rz_guard() { fesetround(o); } } rz;
 		if (m_core->write_stalled)
 			eat_cycles(m_core->icount);
 
