@@ -1356,7 +1356,7 @@ void adsp21062_device::static_generate_entry_point()
 	alloc_handle(m_entry, "entry");
 	UML_HANDLE(block, *m_entry);                                                            // handle  entry
 
-	UML_SETFMOD(block, uml::ROUND_ROUND);                                                   // setfmod round
+	UML_SETFMOD(block, uml::ROUND_TRUNC);   // idea 548 experiment: the board runs mode1 TRUNCATE (STF: mode1=0x18000)
 
 	load_fast_iregs(block);                                                                 // <load fastregs>
 
