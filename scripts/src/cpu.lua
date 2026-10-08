@@ -186,6 +186,9 @@ if CPUS["ARM7"] then
 		MAME_DIR .. "src/devices/cpu/arm7/arm7help.h",
 		MAME_DIR .. "src/devices/cpu/arm7/arm7tdrc.hxx",
 		MAME_DIR .. "src/devices/cpu/arm7/cecalls.hxx",
+		MAME_DIR .. "src/devices/cpu/arm7/arm1176.hxx",
+		MAME_DIR .. "src/devices/cpu/arm7/arm1176vfp.hxx",
+		MAME_DIR .. "src/devices/cpu/arm7/arm7v6.hxx",
 	}
 end
 
@@ -329,6 +332,27 @@ end
 if opt_tool(CPUS, "DSP32C") then
 	table.insert(disasm_files , MAME_DIR .. "src/devices/cpu/dsp32/dsp32dis.cpp")
 	table.insert(disasm_files , MAME_DIR .. "src/devices/cpu/dsp32/dsp32dis.h")
+end
+
+--------------------------------------------------
+-- AT&T DSP3210
+--@src/devices/cpu/dsp32/dsp3210.h,CPUS["DSP3210"] = true
+--------------------------------------------------
+
+if CPUS["DSP3210"] then
+	files {
+		MAME_DIR .. "src/devices/cpu/dsp32/dsp3210.cpp",
+		MAME_DIR .. "src/devices/cpu/dsp32/dsp3210.h",
+		MAME_DIR .. "src/devices/cpu/dsp32/dsp3210dau.h",
+		MAME_DIR .. "src/devices/cpu/dsp32/dsp3210dau.hxx",
+		MAME_DIR .. "src/devices/cpu/dsp32/dsp3210ops.hxx",
+		MAME_DIR .. "src/devices/cpu/dsp32/dsp3210tbl.hxx",
+	}
+end
+
+if opt_tool(CPUS, "DSP3210") then
+	table.insert(disasm_files , MAME_DIR .. "src/devices/cpu/dsp32/dsp3210dis.cpp")
+	table.insert(disasm_files , MAME_DIR .. "src/devices/cpu/dsp32/dsp3210dis.h")
 end
 
 --------------------------------------------------
@@ -1586,37 +1610,20 @@ if opt_tool(CPUS, "PIC1670") then
 end
 
 --------------------------------------------------
--- Microchip PIC16C62x
---@src/devices/cpu/pic16c62x/pic16c62x.h,CPUS["PIC16C62X"] = true
+-- Microchip PIC16 Mid-Range Devices
+--@src/devices/cpu/pic16_mid/pic16_mid.h,CPUS["PIC16_MID"] = true
 --------------------------------------------------
 
-if CPUS["PIC16C62X"] then
+if CPUS["PIC16_MID"] then
 	files {
-		MAME_DIR .. "src/devices/cpu/pic16c62x/pic16c62x.cpp",
-		MAME_DIR .. "src/devices/cpu/pic16c62x/pic16c62x.h",
+		MAME_DIR .. "src/devices/cpu/pic16_mid/pic16_mid.cpp",
+		MAME_DIR .. "src/devices/cpu/pic16_mid/pic16_mid.h",
 	}
 end
 
-if opt_tool(CPUS, "PIC16C62X") then
-	table.insert(disasm_files , MAME_DIR .. "src/devices/cpu/pic16c62x/16c62xdsm.cpp")
-	table.insert(disasm_files , MAME_DIR .. "src/devices/cpu/pic16c62x/16c62xdsm.h")
-end
-
---------------------------------------------------
--- Microchip PIC16x8x
---@src/devices/cpu/pic16x8x/pic16x8x.h,CPUS["PIC16X8X"] = true
---------------------------------------------------
-
-if CPUS["PIC16X8X"] then
-	files {
-		MAME_DIR .. "src/devices/cpu/pic16x8x/pic16x8x.cpp",
-		MAME_DIR .. "src/devices/cpu/pic16x8x/pic16x8x.h",
-	}
-end
-
-if opt_tool(CPUS, "PIC16X8X") then
-	table.insert(disasm_files , MAME_DIR .. "src/devices/cpu/pic16x8x/16x8xdsm.cpp")
-	table.insert(disasm_files , MAME_DIR .. "src/devices/cpu/pic16x8x/16x8xdsm.h")
+if opt_tool(CPUS, "PIC16_MID") then
+	table.insert(disasm_files , MAME_DIR .. "src/devices/cpu/pic16_mid/16x8xdsm.cpp")
+	table.insert(disasm_files , MAME_DIR .. "src/devices/cpu/pic16_mid/16x8xdsm.h")
 end
 
 --------------------------------------------------
@@ -1683,6 +1690,8 @@ if CPUS["MIPS3"] then
 		MAME_DIR .. "src/devices/cpu/mips/o2dprintf.hxx",
 		MAME_DIR .. "src/devices/cpu/mips/ps2vu.cpp",
 		MAME_DIR .. "src/devices/cpu/mips/ps2vu.h",
+		MAME_DIR .. "src/devices/cpu/mips/ps2vufloat.h",
+		MAME_DIR .. "src/devices/cpu/mips/ps2vupipeline.h",
 		MAME_DIR .. "src/devices/cpu/mips/ps2vif1.cpp",
 		MAME_DIR .. "src/devices/cpu/mips/ps2vif1.h",
 		MAME_DIR .. "src/devices/cpu/mips/r4000.cpp",
@@ -4416,9 +4425,16 @@ if opt_tool(CPUS, "OLMS66K") then
 end
 
 --------------------------------------------------
--- Panasonic MN10300, disassembler only
+-- Panasonic MN10300
 --@src/devices/cpu/mn10300/mn10300.h,CPUS["MN10300"] = true
 --------------------------------------------------
+
+if CPUS["MN10300"] then
+	files {
+		MAME_DIR .. "src/devices/cpu/mn10300/mn10300.cpp",
+		MAME_DIR .. "src/devices/cpu/mn10300/mn10300.h",
+	}
+end
 
 if opt_tool(CPUS, "MN10300") then
 	table.insert(disasm_files , MAME_DIR .. "src/devices/cpu/mn10300/mn103dasm.cpp")

@@ -401,6 +401,7 @@ private:
 	inline SHARC_REG FABS(int fx);
 	inline SHARC_REG FMIN(int fx, int fy);
 	inline SHARC_REG FMAX(int fx, int fy);
+	inline uint32_t FLOAT_ALU_RESULT(uint32_t r);
 	inline std::pair<SHARC_REG, SHARC_REG> FADD_FSUB(int fx, int fy);
 	inline uint32_t SCALB(SHARC_REG fx, int ry);
 
@@ -532,6 +533,9 @@ private:
 	void generate_call(drcuml_block &block, compiler_state &compiler, const opcode_desc *desc, bool delayslot);
 	void generate_jump(drcuml_block &block, compiler_state &compiler, const opcode_desc *desc, bool delayslot, bool loopabort, bool clearint);
 	void generate_write_mode1_imm(drcuml_block &block, compiler_state &compiler, const opcode_desc *desc, uint32_t data);
+	void generate_set_fmod(drcuml_block &block, uml::parameter mode1, uml::parameter temp);
+	void generate_load_float(drcuml_block &block, uml::parameter dst, uml::parameter src);
+	void generate_flush_float(drcuml_block &block, uml::parameter reg);
 	void generate_set_mode1_imm(drcuml_block &block, compiler_state &compiler, const opcode_desc *desc, uint32_t data);
 	void generate_clear_mode1_imm(drcuml_block &block, compiler_state &compiler, const opcode_desc *desc, uint32_t data);
 	void generate_toggle_mode1_imm(drcuml_block &block, compiler_state &compiler, const opcode_desc *desc, uint32_t data);

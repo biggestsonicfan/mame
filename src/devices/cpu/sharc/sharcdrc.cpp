@@ -682,6 +682,7 @@ void adsp21062_device::static_generate_pop_status()
 	UML_LOAD(block, I0, &m_core->status_stack[0].mode1, I2, SIZE_DWORD, SCALE_x8);
 	UML_XOR(block, I2, I0, MODE1);
 	UML_MOV(block, MODE1, I0);
+	generate_set_fmod(block, uml::I0, uml::I1);
 
 	// DAG1 regs 4-7
 	UML_TEST(block, I2, MODE1_SRD1H);   // don't swap if the bits are same
@@ -1356,7 +1357,7 @@ void adsp21062_device::static_generate_entry_point()
 	alloc_handle(m_entry, "entry");
 	UML_HANDLE(block, *m_entry);                                                            // handle  entry
 
-	UML_SETFMOD(block, uml::ROUND_ROUND);                                                   // setfmod round
+	generate_set_fmod(block, uml::mem(&m_core->mode1), uml::I0);                          // setfmod from MODE1.TRUNC
 
 	load_fast_iregs(block);                                                                 // <load fastregs>
 
@@ -1591,6 +1592,7 @@ void adsp21062_device::generate_write_mode1_imm(drcuml_block &block, compiler_st
 
 	UML_MOV(block, I2, MODE1);
 	UML_MOV(block, MODE1, data);
+	UML_SETFMOD(block, (data & MODE1_TRUNCATE) ? uml::ROUND_TRUNC : uml::ROUND_ROUND);
 
 	// DAG1 regs 4-7
 	UML_TEST(block, I2, MODE1_SRD1H);   // don't swap if the bits are same
@@ -1663,6 +1665,8 @@ void adsp21062_device::generate_set_mode1_imm(drcuml_block &block, compiler_stat
 	}
 
 	UML_OR(block, MODE1, MODE1, data);
+	if (data & MODE1_TRUNCATE)
+		UML_SETFMOD(block, uml::ROUND_TRUNC);
 }
 
 void adsp21062_device::generate_clear_mode1_imm(drcuml_block &block, compiler_state &compiler, const opcode_desc *desc, uint32_t data)
@@ -1705,9 +1709,38 @@ void adsp21062_device::generate_clear_mode1_imm(drcuml_block &block, compiler_st
 	}
 
 	UML_AND(block, MODE1, MODE1, ~data);
+	if (data & MODE1_TRUNCATE)
+		UML_SETFMOD(block, uml::ROUND_ROUND);
 }
 
 
+
+// MODE1.TRUNC selects round toward zero, otherwise round to nearest
+void adsp21062_device::generate_set_fmod(drcuml_block &block, uml::parameter mode1, uml::parameter temp)
+{
+	UML_BFXU(block, temp, mode1, 15, 1);
+	UML_XOR(block, temp, temp, 1);      // TRUNC=1 -> ROUND_TRUNC (0), TRUNC=0 -> ROUND_ROUND (1)
+	UML_SETFMOD(block, temp);
+}
+
+// load a float operand, flushing a denormal to a zero of the same sign
+void adsp21062_device::generate_load_float(drcuml_block &block, uml::parameter dst, uml::parameter src)
+{
+	UML_AND(block, I9, src, FLOAT_SIGN_MASK);
+	UML_TEST(block, src, FLOAT_EXPONENT_MASK);
+	UML_MOVc(block, COND_NZ, I9, src);
+	UML_FSCOPYI(block, dst, I9);
+}
+
+// flush a denormal float result to a zero of the same sign
+void adsp21062_device::generate_flush_float(drcuml_block &block, uml::parameter reg)
+{
+	UML_ICOPYFS(block, I8, reg);
+	UML_AND(block, I9, I8, FLOAT_SIGN_MASK);
+	UML_TEST(block, I8, FLOAT_EXPONENT_MASK);
+	UML_MOVc(block, COND_NZ, I9, I8);
+	UML_FSCOPYI(block, reg, I9);
+}
 
 void adsp21062_device::generate_update_circular_buffer(drcuml_block &block, compiler_state &compiler, const opcode_desc *desc, int g, int i)
 {
@@ -4008,14 +4041,16 @@ void adsp21062_device::generate_compute(drcuml_block &block, compiler_state &com
 			case 0x30: case 0x31: case 0x32: case 0x33: case 0x34: case 0x35: case 0x36: case 0x37:
 			case 0x38: case 0x39: case 0x3a: case 0x3b: case 0x3c: case 0x3d: case 0x3e: case 0x3f:
 				// Fm = F3-0 * F7-4,   Fa = F11-8 + F15-12,   Fs = F11-8 - F15-12
-				// TODO: denormals
-				UML_FSCOPYI(block, F0, REG(fxm));
-				UML_FSCOPYI(block, F1, REG(fym));
-				UML_FSCOPYI(block, F2, REG(fxa));
-				UML_FSCOPYI(block, F3, REG(fya));
+				generate_load_float(block, uml::F0, REG(fxm));
+				generate_load_float(block, uml::F1, REG(fym));
+				generate_load_float(block, uml::F2, REG(fxa));
+				generate_load_float(block, uml::F3, REG(fya));
 				UML_FSMUL(block, F0, F0, F1);
+				generate_flush_float(block, uml::F0);
 				UML_FSADD(block, F4, F2, F3);
+				generate_flush_float(block, uml::F4);
 				UML_FSSUB(block, F5, F2, F3);
+				generate_flush_float(block, uml::F5);
 
 				if (AZ_CALC_REQUIRED || AN_CALC_REQUIRED)
 					UML_FSCMP(block, F4, mem(&m_core->fp_const.k0_0));
@@ -4075,13 +4110,14 @@ void adsp21062_device::generate_compute(drcuml_block &block, compiler_state &com
 				return;
 
 			case 0x18:          // Fm = F3-0 * F7-4,   Fa = F11-8 + F15-12
-				// TODO: denormals
-				UML_FSCOPYI(block, F0, REG(fxm));
-				UML_FSCOPYI(block, F1, REG(fym));
-				UML_FSCOPYI(block, F2, REG(fxa));
-				UML_FSCOPYI(block, F3, REG(fya));
+				generate_load_float(block, uml::F0, REG(fxm));
+				generate_load_float(block, uml::F1, REG(fym));
+				generate_load_float(block, uml::F2, REG(fxa));
+				generate_load_float(block, uml::F3, REG(fya));
 				UML_FSMUL(block, F0, F0, F1);
+				generate_flush_float(block, uml::F0);
 				UML_FSADD(block, F2, F2, F3);
+				generate_flush_float(block, uml::F2);
 
 				if (AZ_CALC_REQUIRED || AN_CALC_REQUIRED)
 					UML_FSCMP(block, F2, mem(&m_core->fp_const.k0_0));
@@ -4102,13 +4138,14 @@ void adsp21062_device::generate_compute(drcuml_block &block, compiler_state &com
 				return;
 
 			case 0x19:          // Fm = F3-0 * F7-4,   Fa = F11-8 - F15-12
-				// TODO: denormals
-				UML_FSCOPYI(block, F0, REG(fxm));
-				UML_FSCOPYI(block, F1, REG(fym));
-				UML_FSCOPYI(block, F2, REG(fxa));
-				UML_FSCOPYI(block, F3, REG(fya));
+				generate_load_float(block, uml::F0, REG(fxm));
+				generate_load_float(block, uml::F1, REG(fym));
+				generate_load_float(block, uml::F2, REG(fxa));
+				generate_load_float(block, uml::F3, REG(fya));
 				UML_FSMUL(block, F0, F0, F1);
+				generate_flush_float(block, uml::F0);
 				UML_FSSUB(block, F2, F2, F3);
+				generate_flush_float(block, uml::F2);
 
 				if (AZ_CALC_REQUIRED || AN_CALC_REQUIRED)
 					UML_FSCMP(block, F2, mem(&m_core->fp_const.k0_0));
@@ -4133,10 +4170,10 @@ void adsp21062_device::generate_compute(drcuml_block &block, compiler_state &com
 				uml::code_label const denormal = compiler.labelnum++;
 				uml::code_label const end = compiler.labelnum++;
 
-				// TODO: denormals
-				UML_FSCOPYI(block, F0, REG(fxm));
-				UML_FSCOPYI(block, F1, REG(fym));
+				generate_load_float(block, uml::F0, REG(fxm));
+				generate_load_float(block, uml::F1, REG(fym));
 				UML_FSMUL(block, F0, F0, F1);
+				generate_flush_float(block, uml::F0);
 
 				UML_FSFRINT(block, F2, REG(fxa), SIZE_DWORD);
 				UML_ICOPYFS(block, I1, F2);
@@ -4185,10 +4222,10 @@ void adsp21062_device::generate_compute(drcuml_block &block, compiler_state &com
 				uml::code_label const denormal = compiler.labelnum++;
 				uml::code_label const end = compiler.labelnum++;
 
-				// TODO: denormals
-				UML_FSCOPYI(block, F0, REG(fxm));
-				UML_FSCOPYI(block, F1, REG(fym));
+				generate_load_float(block, uml::F0, REG(fxm));
+				generate_load_float(block, uml::F1, REG(fym));
 				UML_FSMUL(block, F0, F0, F1);
+				generate_flush_float(block, uml::F0);
 
 				UML_MOV(block, I1, REG(fxa));
 				UML_BFXU(block, I0, I1, FLOAT_EXPONENT_SHIFT, FLOAT_EXPONENT_BITS);
@@ -4224,7 +4261,7 @@ void adsp21062_device::generate_compute(drcuml_block &block, compiler_state &com
 				UML_FSCOPYI(block, F2, I0);
 				UML_TEST(block, MODE1, MODE1_TRUNCATE);
 				UML_JMPc(block, COND_Z, compiler.labelnum);
-				UML_FSTOINT(block, I0, F2, SIZE_DWORD, ROUND_TRUNC);
+				UML_FSTOINT(block, I0, F2, SIZE_DWORD, ROUND_FLOOR);    // FIX truncates toward -infinity
 				UML_JMP(block, compiler.labelnum + 1);
 				UML_LABEL(block, compiler.labelnum++);
 				UML_FSTOINT(block, I0, F2, SIZE_DWORD, ROUND_ROUND);
@@ -4241,14 +4278,15 @@ void adsp21062_device::generate_compute(drcuml_block &block, compiler_state &com
 			}
 
 			case 0x1c:          // Fm = F3-0 * F7-4,   Fa = (F11-8 + F15-12) / 2
-				// TODO: denormals
-				UML_FSCOPYI(block, F2, REG(fxa));
-				UML_FSCOPYI(block, F3, REG(fya));
-				UML_FSCOPYI(block, F0, REG(fxm));
-				UML_FSCOPYI(block, F1, REG(fym));
+				generate_load_float(block, uml::F2, REG(fxa));
+				generate_load_float(block, uml::F3, REG(fya));
+				generate_load_float(block, uml::F0, REG(fxm));
+				generate_load_float(block, uml::F1, REG(fym));
 				UML_FSADD(block, F2, F2, F3);
 				UML_FSMUL(block, F0, F0, F1);
+				generate_flush_float(block, uml::F0);
 				UML_FSMUL(block, F2, F2, mem(&m_core->fp_const.k0_5));
+				generate_flush_float(block, uml::F2);
 
 				if (AZ_CALC_REQUIRED || AN_CALC_REQUIRED)
 					UML_FSCMP(block, F2, mem(&m_core->fp_const.k0_0));
@@ -4271,8 +4309,8 @@ void adsp21062_device::generate_compute(drcuml_block &block, compiler_state &com
 			case 0x1d:          // Fm = F3-0 * F7-4,   Fa = ABS F11-8
 				// TODO: NaN input to ABS should produce all-1 result
 				// TODO: confirm AS for NaN input to ABS with sign bit
-				UML_FSCOPYI(block, F0, REG(fxm));
-				UML_FSCOPYI(block, F1, REG(fym));
+				generate_load_float(block, uml::F0, REG(fxm));
+				generate_load_float(block, uml::F1, REG(fym));
 				UML_MOV(block, I0, REG(fxa));
 				if (AS_CALC_REQUIRED)
 					UML_BFXU(block, ASTAT_AS, I0, FLOAT_SIGN_SHIFT, 1);
@@ -4282,6 +4320,7 @@ void adsp21062_device::generate_compute(drcuml_block &block, compiler_state &com
 					UML_SETc(block, COND_Z, ASTAT_AZ);
 				UML_MOVc(block, COND_Z, I0, 0);
 				UML_FSMUL(block, F0, F0, F1);
+				generate_flush_float(block, uml::F0);
 
 				if (AN_CALC_REQUIRED) UML_MOV(block, ASTAT_AN, 0);
 				if (AV_CALC_REQUIRED) UML_MOV(block, ASTAT_AV, 0);
@@ -4298,12 +4337,13 @@ void adsp21062_device::generate_compute(drcuml_block &block, compiler_state &com
 				return;
 
 			case 0x1e:          // Fm = F3-0 * F7-4,   Fa = MAX(F11-8, F15-12)
-				// TODO: denormals
-				UML_FSCOPYI(block, F0, REG(fxm));
-				UML_FSCOPYI(block, F1, REG(fym));
+				// TODO: denormals in MIN/MAX
+				generate_load_float(block, uml::F0, REG(fxm));
+				generate_load_float(block, uml::F1, REG(fym));
 				UML_FSCOPYI(block, F2, REG(fxa));
 				UML_FSCOPYI(block, F3, REG(fya));
 				UML_FSMUL(block, F0, F0, F1);
+				generate_flush_float(block, uml::F0);
 
 				UML_FSMOV(block, F4, F2);
 				UML_FSCMP(block, F2, F3);
@@ -4328,12 +4368,13 @@ void adsp21062_device::generate_compute(drcuml_block &block, compiler_state &com
 				return;
 
 			case 0x1f:          // Fm = F3-0 * F7-4,   Fa = MIN(F11-8, F15-12)
-				// TODO: denormals
-				UML_FSCOPYI(block, F0, REG(fxm));
-				UML_FSCOPYI(block, F1, REG(fym));
+				// TODO: denormals in MIN/MAX
+				generate_load_float(block, uml::F0, REG(fxm));
+				generate_load_float(block, uml::F1, REG(fym));
 				UML_FSCOPYI(block, F2, REG(fxa));
 				UML_FSCOPYI(block, F3, REG(fya));
 				UML_FSMUL(block, F0, F0, F1);
+				generate_flush_float(block, uml::F0);
 
 				UML_FSMOV(block, F4, F2);
 				UML_FSCMP(block, F3, F2);
@@ -4544,10 +4585,10 @@ void adsp21062_device::generate_compute(drcuml_block &block, compiler_state &com
 						return;
 
 					case 0x81:      // Fn = Fx + Fy
-						// TODO: denormals
-						UML_FSCOPYI(block, F0, REG(rx));
-						UML_FSCOPYI(block, F1, REG(ry));
+						generate_load_float(block, uml::F0, REG(rx));
+						generate_load_float(block, uml::F1, REG(ry));
 						UML_FSADD(block, F0, F0, F1);
+						generate_flush_float(block, uml::F0);
 						if (AZ_CALC_REQUIRED || AN_CALC_REQUIRED)
 							UML_FSCMP(block, F0, mem(&m_core->fp_const.k0_0));
 						if (AZ_CALC_REQUIRED) UML_SETc(block, COND_Z, ASTAT_AZ);
@@ -4560,10 +4601,10 @@ void adsp21062_device::generate_compute(drcuml_block &block, compiler_state &com
 						return;
 
 					case 0x82:      // Fn = Fx - Fy
-						// TODO: denormals
-						UML_FSCOPYI(block, F0, REG(rx));
-						UML_FSCOPYI(block, F1, REG(ry));
+						generate_load_float(block, uml::F0, REG(rx));
+						generate_load_float(block, uml::F1, REG(ry));
 						UML_FSSUB(block, F0, F0, F1);
+						generate_flush_float(block, uml::F0);
 						if (AZ_CALC_REQUIRED || AN_CALC_REQUIRED)
 							UML_FSCMP(block, F0, mem(&m_core->fp_const.k0_0));
 						if (AZ_CALC_REQUIRED) UML_SETc(block, COND_Z, ASTAT_AZ);
@@ -4576,11 +4617,11 @@ void adsp21062_device::generate_compute(drcuml_block &block, compiler_state &com
 						return;
 
 					case 0x89:      // Fn = (Fx + Fy) / 2
-						// TODO: denormals
-						UML_FSCOPYI(block, F0, REG(rx));
-						UML_FSCOPYI(block, F1, REG(ry));
+						generate_load_float(block, uml::F0, REG(rx));
+						generate_load_float(block, uml::F1, REG(ry));
 						UML_FSADD(block, F0, F0, F1);
 						UML_FSMUL(block, F0, F0, mem(&m_core->fp_const.k0_5));
+						generate_flush_float(block, uml::F0);
 						if (AZ_CALC_REQUIRED || AN_CALC_REQUIRED)
 							UML_FSCMP(block, F0, mem(&m_core->fp_const.k0_0));
 						if (AZ_CALC_REQUIRED) UML_SETc(block, COND_Z, ASTAT_AZ);
@@ -4616,10 +4657,10 @@ void adsp21062_device::generate_compute(drcuml_block &block, compiler_state &com
 						return;
 
 					case 0x91:      // Fn = ABS(Fx + Fy)
-						// TODO: denormals
-						UML_FSCOPYI(block, F0, REG(rx));
-						UML_FSCOPYI(block, F1, REG(ry));
+						generate_load_float(block, uml::F0, REG(rx));
+						generate_load_float(block, uml::F1, REG(ry));
 						UML_FSADD(block, F0, F0, F1);
+						generate_flush_float(block, uml::F0);
 						UML_FSABS(block, F0, F0);
 						UML_ICOPYFS(block, REG(rn), F0);
 						if (AZ_CALC_REQUIRED) UML_MOV(block, ASTAT_AZ, 0);  // TODO
@@ -5039,16 +5080,18 @@ void adsp21062_device::generate_compute(drcuml_block &block, compiler_state &com
 					case 0xf8: case 0xf9: case 0xfa: case 0xfb: case 0xfc: case 0xfd: case 0xfe: case 0xff:
 					{
 						/* Floating-point Dual Add/Subtract */
-						UML_FSCOPYI(block, F0, REG(rx));
-						UML_FSCOPYI(block, F1, REG(ry));
+						generate_load_float(block, uml::F0, REG(rx));
+						generate_load_float(block, uml::F1, REG(ry));
 						UML_FSADD(block, F2, F0, F1);
+						generate_flush_float(block, uml::F2);
 						if (AZ_CALC_REQUIRED || AN_CALC_REQUIRED)
 							UML_FSCMP(block, F2, mem(&m_core->fp_const.k0_0));
 						if (AZ_CALC_REQUIRED) UML_SETc(block, COND_Z, ASTAT_AZ);
 						if (AN_CALC_REQUIRED) UML_SETc(block, COND_C, ASTAT_AN);
 						UML_FSSUB(block, F3, F0, F1);
+						generate_flush_float(block, uml::F3);
 						if (AZ_CALC_REQUIRED || AN_CALC_REQUIRED)
-							UML_FSCMP(block, F2, mem(&m_core->fp_const.k0_0));
+							UML_FSCMP(block, F3, mem(&m_core->fp_const.k0_0));
 						if (AZ_CALC_REQUIRED) UML_SETc(block, COND_Z, I0);
 						if (AN_CALC_REQUIRED) UML_SETc(block, COND_C, I1);
 						if (AZ_CALC_REQUIRED) UML_OR(block, ASTAT_AZ, ASTAT_AZ, I0);
@@ -5245,9 +5288,10 @@ void adsp21062_device::generate_compute(drcuml_block &block, compiler_state &com
 						return;
 
 					case 0x30:      // Fn = Fx * Fy
-						UML_FSCOPYI(block, F0, REG(rx));
-						UML_FSCOPYI(block, F1, REG(ry));
+						generate_load_float(block, uml::F0, REG(rx));
+						generate_load_float(block, uml::F1, REG(ry));
 						UML_FSMUL(block, F0, F0, F1);
+						generate_flush_float(block, uml::F0);
 						UML_ICOPYFS(block, REG(rn), F0);
 						if (MN_CALC_REQUIRED)
 							UML_FSCMP(block, F0, mem(&m_core->fp_const.k0_0));
