@@ -55,6 +55,43 @@ inline bool IS_FLOAT_NAN_MUL(uint32_t a, uint32_t b)
 
 constexpr uint32_t FLOAT_FLUSH_DENORMAL(uint32_t r)     { return IS_FLOAT_DENORMAL_OR_ZERO(r) ? (r & FLOAT_SIGN_MASK) : r; }
 
+// MODE1.TRUNC selects round toward zero for every ALU operation and every
+// floating-point multiplication; the host rounds to nearest, so the toward-zero
+// results are made from the exact result: s, the double nearest it, plus e, the rest.
+// Overflow (|exact| >= 2^128) still gives infinity, which the callers flag and saturate.
+inline float FLOAT_ROUND_TOWARD_ZERO(double s, double e)
+{
+	if (std::abs(s) >= 0x1p128)
+		return float(s);
+	float const f = float(s);
+	double const af = std::abs(double(f));
+	double const as = std::abs(s);
+	if ((af > as) || ((af == as) && (e != 0.0) && ((e < 0.0) != (s < 0.0))))
+		return std::nextafter(f, 0.0f);
+	return f;
+}
+
+inline float FLOAT_ADD_ROUNDED(float x, float y, bool trunc)
+{
+	if (!trunc)
+		return x + y;
+	double const s = double(x) + double(y);
+	double const t = s - x;
+	double const e = (x - (s - t)) + (y - t); // the rounding error of s (TwoSum)
+	return FLOAT_ROUND_TOWARD_ZERO(s, e);
+}
+
+inline float FLOAT_MUL_ROUNDED(float x, float y, bool trunc)
+{
+	// the double product of two floats is exact
+	return trunc ? FLOAT_ROUND_TOWARD_ZERO(double(x) * double(y), 0.0) : (x * y);
+}
+
+inline float FLOAT_FROM_INT_ROUNDED(int32_t x, bool trunc)
+{
+	return trunc ? FLOAT_ROUND_TOWARD_ZERO(double(x), 0.0) : float(x);
+}
+
 
 /*****************************************************************************/
 
@@ -151,7 +188,7 @@ adsp21062_device::SHARC_REG adsp21062_device::FADD(int fx, int fy)
 		SHARC_REG x, y;
 		x.r = FLOAT_FLUSH_DENORMAL(REG(fx));
 		y.r = FLOAT_FLUSH_DENORMAL(REG(fy));
-		r.f = x.f + y.f;
+		r.f = FLOAT_ADD_ROUNDED(x.f, y.f, m_core->mode1 & MODE1_TRUNCATE);
 
 		if (IS_FLOAT_INFINITY(r.r))
 		{
@@ -188,7 +225,7 @@ adsp21062_device::SHARC_REG adsp21062_device::FSUB(int fx, int fy)
 		SHARC_REG x, y;
 		x.r = FLOAT_FLUSH_DENORMAL(REG(fx));
 		y.r = FLOAT_FLUSH_DENORMAL(REG(fy));
-		r.f = x.f - y.f;
+		r.f = FLOAT_ADD_ROUNDED(x.f, -y.f, m_core->mode1 & MODE1_TRUNCATE);
 
 		if (IS_FLOAT_INFINITY(r.r))
 		{
@@ -226,7 +263,7 @@ adsp21062_device::SHARC_REG adsp21062_device::FAVG(int fx, int fy)
 		SHARC_REG x, y;
 		x.r = FLOAT_FLUSH_DENORMAL(REG(fx));
 		y.r = FLOAT_FLUSH_DENORMAL(REG(fy));
-		r.f = (x.f + y.f) * 0.5f;
+		r.f = FLOAT_ADD_ROUNDED(x.f, y.f, m_core->mode1 & MODE1_TRUNCATE) * 0.5f;
 
 		if (IS_FLOAT_INFINITY(r.r))
 		{
@@ -323,6 +360,25 @@ adsp21062_device::SHARC_REG adsp21062_device::FMAX(int fx, int fy)
 }
 
 /* Fx + Fy,   Fx - Fy */
+// overflow saturates under TRUNC, underflow flushes to zero; sets AV/AVS, AZ and AUS
+uint32_t adsp21062_device::FLOAT_ALU_RESULT(uint32_t r)
+{
+	if (IS_FLOAT_INFINITY(r))
+	{
+		m_core->astat |= AV;
+		m_core->stky |= AVS;
+		if (m_core->mode1 & MODE1_TRUNCATE)
+			r = (r & FLOAT_SIGN_MASK) | 0x7f7fffff;
+	}
+	else if (IS_FLOAT_DENORMAL_OR_ZERO(r))
+	{
+		m_core->astat |= AZ;
+		m_core->stky |= ((r & FLOAT_MANTISSA_MASK) != 0) ? AUS : 0;
+		r &= FLOAT_SIGN_MASK;
+	}
+	return r;
+}
+
 std::pair<adsp21062_device::SHARC_REG, adsp21062_device::SHARC_REG> adsp21062_device::FADD_FSUB(int fx, int fy)
 {
 	std::pair<SHARC_REG, SHARC_REG> r;
@@ -343,36 +399,12 @@ std::pair<adsp21062_device::SHARC_REG, adsp21062_device::SHARC_REG> adsp21062_de
 		SHARC_REG x, y;
 		x.r = FLOAT_FLUSH_DENORMAL(REG(fx));
 		y.r = FLOAT_FLUSH_DENORMAL(REG(fy));
-		r.first.f = x.f + y.f;
-		r.second.f = x.f - y.f;
+		bool const trunc = m_core->mode1 & MODE1_TRUNCATE;
+		r.first.f = FLOAT_ADD_ROUNDED(x.f, y.f, trunc);
+		r.second.f = FLOAT_ADD_ROUNDED(x.f, -y.f, trunc);
 
-		if (IS_FLOAT_INFINITY(r.first.r))
-		{
-			m_core->astat |= AV;
-			m_core->stky |= AVS;
-			if (m_core->mode1 & MODE1_TRUNCATE)
-				r.first.r = (r.first.r & FLOAT_SIGN_MASK) | 0x7f7fffff;
-		}
-		else if (IS_FLOAT_DENORMAL_OR_ZERO(r.first.r))
-		{
-			m_core->astat |= AZ;
-			m_core->stky |= ((r.first.r & FLOAT_MANTISSA_MASK) != 0) ? AUS : 0;
-			r.first.r &= FLOAT_SIGN_MASK;
-		}
-
-		if (IS_FLOAT_INFINITY(r.second.r))
-		{
-			m_core->astat |= AV;
-			m_core->stky |= AVS;
-			if (m_core->mode1 & MODE1_TRUNCATE)
-				r.second.r = (r.second.r & FLOAT_SIGN_MASK) | 0x7f7fffff;
-		}
-		else if (IS_FLOAT_DENORMAL_OR_ZERO(r.second.r))
-		{
-			m_core->astat |= AZ;
-			m_core->stky |= ((r.second.r & FLOAT_MANTISSA_MASK) != 0) ? AUS : 0;
-			r.second.r &= FLOAT_SIGN_MASK;
-		}
+		r.first.r = FLOAT_ALU_RESULT(r.first.r);
+		r.second.r = FLOAT_ALU_RESULT(r.second.r);
 
 		m_core->astat |= ((r.first.r | r.second.r) & FLOAT_SIGN_MASK) ? AN : 0;
 	}
@@ -443,13 +475,26 @@ adsp21062_device::SHARC_REG adsp21062_device::FMUL(int fx, int fy)
 	}
 	else
 	{
-		r.f = FREG(fx) * FREG(fy);
+		SHARC_REG x, y;
+		x.r = FLOAT_FLUSH_DENORMAL(REG(fx));
+		y.r = FLOAT_FLUSH_DENORMAL(REG(fy));
+		r.f = FLOAT_MUL_ROUNDED(x.f, y.f, m_core->mode1 & MODE1_TRUNCATE);
 
+		if (IS_FLOAT_INFINITY(r.r))
+		{
+			m_core->astat |= MV;
+			m_core->stky |= MVS;
+			if ((m_core->mode1 & MODE1_TRUNCATE) && !IS_FLOAT_INFINITY(x.r) && !IS_FLOAT_INFINITY(y.r))
+				r.r = (r.r & FLOAT_SIGN_MASK) | 0x7f7fffff;
+		}
+		else if (IS_FLOAT_DENORMAL_OR_ZERO(r.r) && !IS_FLOAT_ZERO(x.r) && !IS_FLOAT_ZERO(y.r))
+		{
+			// underflow: flushed to zero
+			m_core->astat |= MU;
+			m_core->stky |= MUS;
+			r.r &= FLOAT_SIGN_MASK;
+		}
 		m_core->astat |= (r.r & FLOAT_SIGN_MASK) ? MN : 0;
-		m_core->astat |= IS_FLOAT_INFINITY(r.r) ? MV : 0;
-		m_core->astat |= IS_FLOAT_DENORMAL(r.r) ? MU : 0;
-		m_core->stky |= IS_FLOAT_INFINITY(r.r) ? MVS : 0;
-		m_core->stky |= IS_FLOAT_DENORMAL(r.r) ? MUS : 0;
 	}
 	return r;
 }
@@ -820,7 +865,7 @@ void adsp21062_device::compute_fadd_abs(int fn, int fx, int fy)
 		SHARC_REG x, y;
 		x.r = FLOAT_FLUSH_DENORMAL(REG(fx));
 		y.r = FLOAT_FLUSH_DENORMAL(REG(fy));
-		r.f = x.f + y.f;
+		r.f = FLOAT_ADD_ROUNDED(x.f, y.f, m_core->mode1 & MODE1_TRUNCATE);
 		r.r &= ~FLOAT_SIGN_MASK;
 
 		if (r.r == FLOAT_EXPONENT_MASK) // sign bit won't be set, avoid redundant masking
@@ -859,7 +904,7 @@ void adsp21062_device::compute_fsub_abs(int fn, int fx, int fy)
 		SHARC_REG x, y;
 		x.r = FLOAT_FLUSH_DENORMAL(REG(fx));
 		y.r = FLOAT_FLUSH_DENORMAL(REG(fy));
-		r.f = x.f - y.f;
+		r.f = FLOAT_ADD_ROUNDED(x.f, -y.f, m_core->mode1 & MODE1_TRUNCATE);
 		r.r &= ~FLOAT_SIGN_MASK;
 
 		if (r.r == FLOAT_EXPONENT_MASK) // sign bit won't be set, avoid redundant masking
@@ -1119,7 +1164,7 @@ void adsp21062_device::compute_fix(int rn, int fx)
 void adsp21062_device::compute_float_scaled(int fn, int rx, int ry)
 {
 	SHARC_REG x;
-	x.f = float(int32_t(REG(rx)));
+	x.f = FLOAT_FROM_INT_ROUNDED(int32_t(REG(rx)), m_core->mode1 & MODE1_TRUNCATE);
 
 	// verified
 	CLEAR_ALU_FLAGS();
@@ -1140,7 +1185,7 @@ void adsp21062_device::compute_float_scaled(int fn, int rx, int ry)
 void adsp21062_device::compute_float(int fn, int rx)
 {
 	// verified
-	FREG(fn) = (float)(int32_t)REG(rx);
+	FREG(fn) = FLOAT_FROM_INT_ROUNDED(int32_t(REG(rx)), m_core->mode1 & MODE1_TRUNCATE);
 
 	CLEAR_ALU_FLAGS();
 	// AN
@@ -1562,7 +1607,7 @@ void adsp21062_device::compute_fmul_float_scaled(int fm, int fxm, int fym, int f
 	SHARC_REG x;
 	SHARC_REG r_alu;
 
-	x.f = float(int32_t(REG(rxa)));
+	x.f = FLOAT_FROM_INT_ROUNDED(int32_t(REG(rxa)), m_core->mode1 & MODE1_TRUNCATE);
 
 	r_alu.r = SCALB(x, rya);
 
@@ -1593,7 +1638,7 @@ void adsp21062_device::compute_fmul_fix_scaled(int fm, int fxm, int fym, int ra,
 
 	if (m_core->mode1 & MODE1_TRUNCATE)
 	{
-		alu_i = int32_t(r_alu.f);
+		alu_i = int32_t(floorf(r_alu.f)); // FIX truncates toward -infinity (only TRUNC rounds toward zero)
 	}
 	else
 	{
