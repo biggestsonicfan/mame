@@ -5272,6 +5272,7 @@ void adsp21062_device::generate_compute(drcuml_block &block, compiler_state &com
 						return;
 
 					case 0x14:      // MRF = 0
+					case 0x15:      // MRF = 0 (fractional)
 						UML_DMOV(block, mem(&m_core->mrf), 0);
 						if (MN_CALC_REQUIRED) UML_MOV(block, ASTAT_MN, 0);
 						if (MV_CALC_REQUIRED) UML_MOV(block, ASTAT_MV, 0);
@@ -5280,6 +5281,7 @@ void adsp21062_device::generate_compute(drcuml_block &block, compiler_state &com
 						return;
 
 					case 0x16:      // MRB = 0
+					case 0x17:      // MRB = 0 (fractional)
 						UML_DMOV(block, mem(&m_core->mrb), 0);
 						if (MN_CALC_REQUIRED) UML_MOV(block, ASTAT_MN, 0);
 						if (MV_CALC_REQUIRED) UML_MOV(block, ASTAT_MV, 0);

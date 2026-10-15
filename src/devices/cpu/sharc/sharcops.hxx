@@ -890,8 +890,9 @@ void adsp21062_device::COMPUTE(uint32_t opcode)
 			{
 				switch(op)
 				{
-					case 0x14:      m_core->mrf = 0; break;
-					case 0x16:      m_core->mrb = 0; break;
+					// MRF/MRB = 0; bit 0 (the fractional flag) changes nothing
+					case 0x14: case 0x15:      m_core->mrf = 0; break;
+					case 0x16: case 0x17:      m_core->mrb = 0; break;
 
 					case 0x30:      compute_fmul(rn, rx, ry); break;
 					case 0x40:      compute_mul_uuin(rn, rx, ry); break;
