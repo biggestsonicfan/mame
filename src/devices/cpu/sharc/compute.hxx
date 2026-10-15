@@ -1383,6 +1383,77 @@ uint32_t adsp21062_device::compute_mrb_plus_mul_ssin(int rx, int ry)
 	return uint32_t(r);
 }
 
+/* Round a fractional MR to nearest (ties to even) at bit 32 */
+static inline uint64_t round_mr(uint64_t r)
+{
+	uint64_t const t = r + 0x80000000U;
+	return (uint32_t(r) == 0x80000000U) ? (t & ~uint64_t(0x1ffffffffU)) : t;
+}
+
+/*
+    The fixed-point multiplier operations not handled above. Op bit 2 sends the
+    result to MR (bit 1: MRB, else MRF), else to Rn; bits 7-6 pick SAT/RND/clear
+    (0), Rx * Ry (1), MR + Rx * Ry (2) or MR - Rx * Ry (3). For a product, bit 4
+    makes Rx signed, bit 5 Ry, bit 3 fractional (operands 1.31: the product is
+    shifted left one bit and Rn takes its upper word, an integer Rn the lower)
+    and bit 0 rounds. MR2 (the top 16 bits of the 80-bit MR) is not kept.
+*/
+void adsp21062_device::compute_mul_fixed(int op, int rn, int rx, int ry)
+{
+	bool const to_mr = op & 0x4;
+	uint64_t &mr = (op & 0x2) ? m_core->mrb : m_core->mrf;
+	bool const frac = op & 0x8;
+	uint64_t r;
+
+	switch (op >> 6)
+	{
+		case 0:
+			switch ((op >> 4) & 0x3)
+			{
+				case 0:         // SAT MR: integer to 32 bits (bit 0 signed); fractional has no MR2 to saturate from
+					if (frac)
+						r = mr;
+					else if (op & 0x1)
+						r = uint64_t(std::clamp<int64_t>(int64_t(mr), INT32_MIN, INT32_MAX));
+					else
+						r = (mr >> 32) ? 0xffffffffU : mr;
+					break;
+				case 1:         // RND MR, or 0
+					r = frac ? round_mr(mr) : 0;
+					if (to_mr && frac) r &= ~uint64_t(0xffffffffU);
+					break;
+				default:
+					throw emu_fatalerror("%s: compute: multiplier operation %02X not implemented ! (%08X)", tag(), op, m_core->pc);
+			}
+			break;
+
+		default:
+		{
+			uint64_t const x = (op & 0x10) ? uint64_t(int64_t(int32_t(REG(rx)))) : uint64_t(REG(rx));
+			uint64_t const y = (op & 0x20) ? uint64_t(int64_t(int32_t(REG(ry)))) : uint64_t(REG(ry));
+			uint64_t p = x * y;
+			if (frac) p <<= 1;
+			r = (op >> 6) == 1 ? p : (op >> 6) == 2 ? mr + p : mr - p;
+			if (frac && (op & 0x1)) r = round_mr(r);
+			if (to_mr && frac && (op & 0x1)) r &= ~uint64_t(0xffffffffU);
+			break;
+		}
+	}
+
+	CLEAR_MULTIPLIER_FLAGS();
+	if (to_mr)
+	{
+		mr = r;
+		SET_FLAG_MN(uint32_t(r >> 32));
+		return;
+	}
+	uint32_t const out = frac ? uint32_t(r >> 32) : uint32_t(r);
+	SET_FLAG_MN(out);
+	if (!frac) SET_FLAG_MV(r);
+	if (frac) SET_FLAG_MU(r);
+	REG(rn) = out;
+}
+
 /* Fn = Fx * Fy */
 void adsp21062_device::compute_fmul(int fn, int fx, int fy)
 {
