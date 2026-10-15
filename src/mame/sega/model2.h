@@ -271,6 +271,7 @@ protected:
 	u32 m_geoctl = 0;    // M2-X11: protected so model2b_state's geo SHARC overrides can boot/stream
 	u32 m_geocnt = 0;
 	bool m_hle_geo_off = false;   // M2-X11: env M2_HLE_GEO_OFF disables the HLE geo_parse (see screen_vblank)
+	bool m_geo_sharc_off = false;   // M2-X11: env M2_GEO_SHARC_OFF never runs cpres2 (see machine_reset)
 	u32  m_hle_op_count[32] = {}; // M2-X11: HLE-side opcode census, to compare vs cpres2's m_geo_op_count
 	u32  m_hle_op_dumped = 0;
 private:

@@ -362,6 +362,9 @@ void model2b_state::machine_reset()
 	m_geo_raster_cap.clear();
 	// M2-X11: env toggle to disable the HLE geometrizer (prove the screen 3D is HLE vs the real SHARC).
 	m_hle_geo_off = (getenv("M2_HLE_GEO_OFF") != nullptr);
+	// env M2_GEO_SHARC_OFF keeps cpres2 halted, as upstream: the HLE alone draws, and a bad command
+	// list read by cpres2 (it can jump into data and hit an unimplemented op) cannot stop the machine.
+	m_geo_sharc_off = (getenv("M2_GEO_SHARC_OFF") != nullptr);
 
 	// M2-X11: cache the "polygons" (Models) ROM base for cpres2's OBJECT mesh fetch (geo_poly_r). The
 	// region is byte-organized; the HLE reinterprets it as u32* (polygon_rom[oba & mask]).
@@ -1010,8 +1013,9 @@ void model2b_state::geo_ctl1_w(u32 data)
 			logerror("Boot geo SHARC, %d dwords\n", m_geocnt);
 			m_geo_raster_cap.clear();
 			m_geo_raster_log_n = 0;
-			m_geo_sharc_booted = true;
-			m_geo_adsp->set_input_line(INPUT_LINE_HALT, CLEAR_LINE);    // run cpres2
+			m_geo_sharc_booted = !m_geo_sharc_off;
+			if (m_geo_sharc_booted)
+				m_geo_adsp->set_input_line(INPUT_LINE_HALT, CLEAR_LINE);    // run cpres2
 		}
 	}
 
