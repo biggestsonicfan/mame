@@ -902,6 +902,11 @@ void adsp21062_device::COMPUTE(uint32_t opcode)
 					case 0xb2:      REG(rn) = compute_mrb_plus_mul_ssin(rx, ry); break;
 
 					default:
+						if (op >= 0x40 || op < 0x20)
+						{
+							compute_mul_fixed(op, rn, rx, ry);
+							break;
+						}
 						throw emu_fatalerror("%s: compute: multiplier operation %02X not implemented ! (%08X, %08X)", tag(), op, m_core->pc, opcode);
 				}
 				break;

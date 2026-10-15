@@ -457,6 +457,7 @@ private:
 	inline void compute_mul_ssin(int rn, int rx, int ry);
 	inline uint32_t compute_mrf_plus_mul_ssin(int rx, int ry);
 	inline uint32_t compute_mrb_plus_mul_ssin(int rx, int ry);
+	void compute_mul_fixed(int op, int rn, int rx, int ry);
 	inline void compute_fmul(int fn, int fx, int fy);
 
 	// Dual add/subtract
