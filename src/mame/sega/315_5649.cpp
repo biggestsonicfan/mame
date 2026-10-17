@@ -171,7 +171,11 @@ uint8_t sega_315_5649_device::read(offs_t offset)
 	case 0x0c:
 	{
 		unsigned ch = offset - 0x0b;
-		if (m_loop_count[ch]) // pop from the RX FIFO (LOOP echo or host injection)
+		if (!m_serial_rd_cb[ch].isunset()) // a device wired to this channel (hotd's light gun mux) answers it
+		{
+			data = m_serial_rd_cb[ch](0);
+		}
+		else if (m_loop_count[ch]) // pop from the RX FIFO (LOOP echo or host injection)
 		{
 			data = m_loop_fifo[ch][m_loop_head[ch]];
 			if (!machine().side_effects_disabled())
