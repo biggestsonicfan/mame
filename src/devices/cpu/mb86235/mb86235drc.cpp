@@ -574,6 +574,9 @@ void mb86235_device::generate_ea(drcuml_block &block, compiler_state &compiler, 
 		case 0xa:   // @ARx+disp12
 			UML_ADD(block, I0, AR(arx), disp);
 			break;
+		case 0xc:   // @disp (absolute)
+			UML_MOV(block, I0, disp);
+			break;
 
 		default:
 			fatalerror("generate_ea: md = %02X, PC = %08X", md, desc->pc);
