@@ -154,6 +154,8 @@ inline uint32_t mb86235_device::decode_ea(uint8_t mode, uint8_t rx, uint8_t ry, 
 			return m_core->ar[rx] + disp;
 		case 0x0b: // ARx + ARy + disp14
 			return m_core->ar[rx] + m_core->ar[ry] + disp;
+		case 0x0c: // disp14 (absolute)
+			return disp;
 		case 0x0d: // ARx + [ARy++]
 			res = m_core->ar[ry] & (0x1ff >> (7 - (isbbus ? ((m_core->mod >> 8) & 7) : ((m_core->mod >> 12) & 7))));
 			if (m_core->cur_fifo_state.has_stalled == true)
