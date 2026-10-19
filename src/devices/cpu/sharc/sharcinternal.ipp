@@ -246,7 +246,8 @@ struct alignas(16) adsp21062_device::sharc_internal_state
 // Model 2's cpres1 stores its afterimage matrices over DM and reads them back over PM).
 // Block 1 only: block 0 holds the program, and MAME packs its 48-bit words in a layout of
 // its own, where the 32-bit words a program pokes over PM (cpres1's pm(0x21f18) syncs) are
-// instruction bits.
+// instruction bits. cpres1 (and the i960 that boots it) writes SYSCON 0xa100: IMDW0 set,
+// IMDW1 clear, so on Model 2 block 0 is 40-bit and the packed view is the right one there.
 inline bool adsp21062_device::pm_data32(uint32_t address) const
 {
 	if (address < 0x20000 || address >= 0x40000)
