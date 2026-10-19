@@ -3352,8 +3352,10 @@ bool adsp21062_device::generate_opcode(drcuml_block &block, compiler_state &comp
 				UML_MOV(block, mem(&m_core->dreg_temp), REG(pm_dreg));
 				temp_pm_dreg = true;
 			}
+			// the PM transfer runs first: a PM read into the register the DM write stores
+			// (DM(I7,M1) = R0, R0 = PM(I9,M9)) must not change what is stored
 			bool temp_dm_dreg = false;
-			if (compute != 0 && dmd && desc->regout[dm_dreg])
+			if (dmd && ((compute != 0 && desc->regout[dm_dreg]) || (!pmd && pm_dreg == dm_dreg)))
 			{
 				UML_MOV(block, mem(&m_core->dreg_temp2), REG(dm_dreg));
 				temp_dm_dreg = true;
