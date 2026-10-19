@@ -319,7 +319,7 @@ private:
 	inline void CHANGE_PC(uint32_t newpc);
 	inline void CHANGE_PC_DELAYED(uint32_t newpc);
 	void sharc_iop_delayed_w(uint32_t reg, uint32_t data, int cycles);
-	static constexpr uint32_t SYSCON_IMDW1 = 1U << 10;
+	static constexpr uint32_t SYSCON_IMDW1 = 1U << 9;  // IMDW0 is bit 8 (ADI def21060.h: IMDW0X 0x100, IMDW1X 0x200)
 	bool pm_data32(uint32_t address) const;
 	uint32_t pm_read32(uint32_t address);
 	void pm_write32(uint32_t address, uint32_t data);
