@@ -292,9 +292,8 @@ void adsp21062_device::static_generate_memory_accessors()
 	UML_MOVc(block, COND_B, mem(&m_core->force_recompile), 1);
 	UML_RET(block);
 
-	// 32-bit program read (32-bit data in internal memory: see pm_data32)
+	// 32-bit program read (32-bit data in internal block 1: see pm_data32)
 	{
-		uml::code_label const block1 = label++;
 		uml::code_label const program = label++;
 		alloc_handle(m_pm_read32, "pm_read32");
 		UML_HANDLE(block, *m_pm_read32);
@@ -303,13 +302,7 @@ void adsp21062_device::static_generate_memory_accessors()
 		UML_CMP(block, I1, 0x40000);
 		UML_JMPc(block, COND_AE, program);
 		UML_TEST(block, I1, ~(m_blocks[0].length() - 1) & 0x1ffff);
-		UML_JMPc(block, COND_NZ, block1);
-		UML_TEST(block, mem(&m_core->syscon), SYSCON_IMDW0);
-		UML_JMPc(block, COND_NZ, program);
-		UML_AND(block, I1, I1, m_blocks[0].length() - 1);
-		UML_LOAD(block, I0, &m_blocks[0][0], I1, SIZE_DWORD, SCALE_x4);
-		UML_RET(block);
-		UML_LABEL(block, block1);
+		UML_JMPc(block, COND_Z, program);
 		UML_TEST(block, mem(&m_core->syscon), SYSCON_IMDW1);
 		UML_JMPc(block, COND_NZ, program);
 		UML_AND(block, I1, I1, m_blocks[0].length() - 1);
@@ -323,7 +316,6 @@ void adsp21062_device::static_generate_memory_accessors()
 
 	// 32-bit program write
 	{
-		uml::code_label const block1 = label++;
 		uml::code_label const program = label++;
 		alloc_handle(m_pm_write32, "pm_write32");
 		UML_HANDLE(block, *m_pm_write32);
@@ -332,13 +324,7 @@ void adsp21062_device::static_generate_memory_accessors()
 		UML_CMP(block, I1, 0x40000);
 		UML_JMPc(block, COND_AE, program);
 		UML_TEST(block, I1, ~(m_blocks[0].length() - 1) & 0x1ffff);
-		UML_JMPc(block, COND_NZ, block1);
-		UML_TEST(block, mem(&m_core->syscon), SYSCON_IMDW0);
-		UML_JMPc(block, COND_NZ, program);
-		UML_AND(block, I1, I1, m_blocks[0].length() - 1);
-		UML_STORE(block, &m_blocks[0][0], I1, I0, SIZE_DWORD, SCALE_x4);
-		UML_RET(block);
-		UML_LABEL(block, block1);
+		UML_JMPc(block, COND_Z, program);
 		UML_TEST(block, mem(&m_core->syscon), SYSCON_IMDW1);
 		UML_JMPc(block, COND_NZ, program);
 		UML_AND(block, I1, I1, m_blocks[0].length() - 1);

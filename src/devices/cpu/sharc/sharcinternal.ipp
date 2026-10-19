@@ -243,13 +243,15 @@ struct alignas(16) adsp21062_device::sharc_internal_state
 
 // A PM bus data access to internal memory is as wide as the block's data (SYSCON IMDW0/IMDW1,
 // bits 9/10): 32-bit data in a block with IMDW clear is the same word a DM access sees (Sega
-// Model 2's cpres1 stores its afterimage matrices over DM and reads them back over PM)
+// Model 2's cpres1 stores its afterimage matrices over DM and reads them back over PM).
+// Block 1 only: block 0 holds the program, and MAME packs its 48-bit words in a layout of
+// its own, where the 32-bit words a program pokes over PM (cpres1's pm(0x21f18) syncs) are
+// instruction bits.
 inline bool adsp21062_device::pm_data32(uint32_t address) const
 {
 	if (address < 0x20000 || address >= 0x40000)
 		return false;
-	bool const block1 = address & ~(m_blocks[0].length() - 1) & 0x1ffff;
-	return !(m_core->syscon & (block1 ? SYSCON_IMDW1 : SYSCON_IMDW0));
+	return (address & ~(m_blocks[0].length() - 1) & 0x1ffff) && !(m_core->syscon & SYSCON_IMDW1);
 }
 
 // When PM bus is used to transfer 32-bit data, it is aligned to the upper 32 bits of the bus
