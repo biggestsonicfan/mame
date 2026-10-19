@@ -242,14 +242,29 @@ struct alignas(16) adsp21062_device::sharc_internal_state
 
 // SHARC memory operations
 
+// A PM bus data access to internal memory is as wide as the block's data (SYSCON IMDW0/IMDW1,
+// bits 9/10): 32-bit data in a block with IMDW clear is the same word a DM access sees (Sega
+// Model 2's cpres1 stores its afterimage matrices over DM and reads them back over PM)
+inline bool adsp21062_device::pm_data32(uint32_t address) const
+{
+	if (address < 0x20000 || address >= 0x40000)
+		return false;
+	bool const block1 = address & ~(m_blocks[0].length() - 1) & 0x1ffff;
+	return !(m_core->syscon & (block1 ? SYSCON_IMDW1 : SYSCON_IMDW0));
+}
+
 // When PM bus is used to transfer 32-bit data, it is aligned to the upper 32 bits of the bus
 inline uint32_t adsp21062_device::pm_read32(uint32_t address)
 {
+	if (pm_data32(address))
+		return m_data.read_dword(address);
 	return uint32_t(m_program.read_qword(address) >> 16);
 }
 
 inline void adsp21062_device::pm_write32(uint32_t address, uint32_t data)
 {
+	if (pm_data32(address))
+		return m_data.write_dword(address, data);
 	// TODO: mask should probably be set to all ones
 	m_program.write_qword(address, uint64_t(data) << 16, 0x0000ffff'ffff0000U);
 }
