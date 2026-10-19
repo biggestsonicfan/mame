@@ -542,8 +542,8 @@ void adsp21062_device::external_dma_write(offs_t address, uint64_t data)
 	{
 		case 0:         // no packing
 		{
-			if (dtype)
-				pm_write32(index, data);
+			if (dtype)    // instruction words: the upper 32 bits of the 48-bit word, whatever IMDW says
+				m_program.write_qword(index, data << 16, 0x0000ffff'ffff0000U);
 			else
 				dm_write32(index, data);
 
