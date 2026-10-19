@@ -243,7 +243,7 @@ struct alignas(16) adsp21062_device::sharc_internal_state
 // SHARC memory operations
 
 // A PM bus data access to internal memory is as wide as the block's data (SYSCON IMDW0/IMDW1,
-// bits 9/10): 32-bit data in a block with IMDW clear is the same word a DM access sees (Sega
+// bits 8/9): 32-bit data in a block with IMDW clear is the same word a DM access sees (Sega
 // Model 2's cpres1 stores its afterimage matrices over DM and reads them back over PM).
 // Block 1 only: block 0 holds the program, and MAME packs its 48-bit words in a layout of
 // its own, where the 32-bit words a program pokes over PM (cpres1's pm(0x21f18) syncs) are
