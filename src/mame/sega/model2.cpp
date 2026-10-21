@@ -14,7 +14,6 @@
     - clean-ups;
 
     TODO (per-game issues)
-    - doa, doaa: corrupted sound, eventually becomes silent;
     - lastbrnx: uses external DMA port 0 for uploading SHARC program, hook-up might not be 100% right;
     - manxtt: no escape from "active motion slider" tutorial (needs analog inputs),
               bypass it by entering then exiting service mode;
@@ -5958,8 +5957,11 @@ ROM_START( rchase2 ) /* Rail Chase 2 Revision A, Model 2B. Sega game ID# 833-118
 	ROM_LOAD16_WORD_SWAP("epr-18047.31", 0x000000, 0x080000, CRC(4c31d459) SHA1(424d5e5a7787d0d4c68aa919ba7d575babfd1ce0) )
 
 	ROM_REGION16_BE( 0x800000, "samples", 0 ) // Samples
+	// 16Mbit ROMs in 32Mbit sockets: A21 is not decoded, so each ROM is mirrored
 	ROM_LOAD16_WORD_SWAP("mpr-18029.32", 0x0000000, 0x200000, CRC(f6804150) SHA1(ef40c11008c75d04159772ad30f02cdb8c5464f3) )
+	ROM_RELOAD(                          0x0200000, 0x200000 )
 	ROM_LOAD16_WORD_SWAP("mpr-18030.34", 0x0400000, 0x200000, CRC(1167615d) SHA1(bae0060aec3c15f08342f11df665c05c5703523d) )
+	ROM_RELOAD(                          0x0600000, 0x200000 )
 
 	/* Z80 code located on the I/O board type 837-11694. Z80 @ 4Mhz with 8-way DSW & SONY CXD1095Q QFP64 chip */
 	ROM_REGION( 0x8000, "iocpu", 0 )
@@ -6000,8 +6002,11 @@ ROM_START( rchase2a ) /* Rail Chase 2, Model 2B */
 	ROM_LOAD16_WORD_SWAP("epr-18047.31", 0x000000, 0x080000, CRC(4c31d459) SHA1(424d5e5a7787d0d4c68aa919ba7d575babfd1ce0) )
 
 	ROM_REGION16_BE( 0x800000, "samples", 0 ) // Samples
+	// 16Mbit ROMs in 32Mbit sockets: A21 is not decoded, so each ROM is mirrored
 	ROM_LOAD16_WORD_SWAP("mpr-18029.32", 0x0000000, 0x200000, CRC(f6804150) SHA1(ef40c11008c75d04159772ad30f02cdb8c5464f3) )
+	ROM_RELOAD(                          0x0200000, 0x200000 )
 	ROM_LOAD16_WORD_SWAP("mpr-18030.34", 0x0400000, 0x200000, CRC(1167615d) SHA1(bae0060aec3c15f08342f11df665c05c5703523d) )
+	ROM_RELOAD(                          0x0600000, 0x200000 )
 
 	/* Z80 code located on the I/O board type 837-11694. Z80 @ 4Mhz with 8-way DSW & SONY CXD1095Q QFP64 chip */
 	ROM_REGION( 0x8000, "iocpu", 0 )
@@ -7657,8 +7662,8 @@ ROM_START( daytonam ) /* Daytona USA (Japan, To The MAXX) */
 	ROM_SYSTEM_BIOS(1, "16488", "drive board ROM 16488")
 	ROMX_LOAD("epr-16488.ic12",  0x000000, 0x010000, CRC(4f0b8114) SHA1(1fcebd0632da8f224a04fe6b39147a05eb358e83), ROM_BIOS(1) )
 
-	ROM_REGION( 0x10000, "pic", 0)
-	ROM_LOAD("pic.bin", 0x00000, 0x10000, NO_DUMP )
+	ROM_REGION16_LE( 0x4280, "pic", 0 )
+	ROM_LOAD( "pic.bin", 0x0000, 0x4280, NO_DUMP )
 ROM_END
 
 ROM_START( daytonagtx )
