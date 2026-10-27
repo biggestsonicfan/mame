@@ -279,6 +279,11 @@ void m2comm_device::cn_w(uint8_t data)
 		// reset command
 		osd_printf_verbose("M2COMM: board disabled\n");
 		m_linkenable = 0x00;
+
+		// a disabled board drops off the ring: close both lines, so the other
+		// nodes see the link go down and an enable starts a new one
+		m_line_rx.reset();
+		m_line_tx.reset();
 		m_zfg = 0;
 		m_cn = 0;
 		m_fg = 0;
@@ -375,6 +380,7 @@ void m2comm_device::comm_tick()
 				osd_printf_verbose("M2COMM: listen on %s\n", m_localhost);
 				uint64_t filesize; // unused
 				osd_file::open(m_localhost, OPEN_FLAG_CREATE, m_line_rx, filesize);
+				m_rx_accepted = false;
 			}
 
 			// check tx socket
@@ -643,34 +649,53 @@ int m2comm_device::read_frame(int dataSize)
 			int offset = recv;
 			while (togo > 0)
 			{
-				filerr = m_line_rx->read(m_buffer1, 0, togo, recv);
-				if (recv > 0)
+				std::uint32_t got = 0;
+				filerr = m_line_rx->read(m_buffer1, 0, togo, got);
+				if (got > 0)
 				{
-					for (int i = 0 ; i < recv ; i++)
+					for (int i = 0 ; i < got ; i++)
 					{
 						m_buffer0[offset + i] = m_buffer1[i];
 					}
-					togo -= recv;
-					offset += recv;
+					togo -= got;
+					offset += got;
 				}
-				else if (!filerr && recv == 0)
+				else if (filerr != std::errc::operation_would_block)
 				{
-					togo = 0;
+					// the other end closed or failed mid-message
+					link_lost("rx connection lost");
+					return 0;
 				}
 			}
 		}
 	}
-	else if (!filerr && recv == 0)
+	else if (!filerr)
 	{
-		if (m_linkalive == 0x01)
-		{
-			osd_printf_verbose("M2COMM: rx connection lost\n");
-			m_linkalive = 0x02;
-			m_linktimer = 0x00;
-			m_line_rx.reset();
-		}
+		// the listening socket's first empty read is the accept;
+		// an empty read after that is the other end closing
+		if (!m_rx_accepted)
+			m_rx_accepted = true;
+		else
+			link_lost("rx connection lost");
+	}
+	else if (filerr != std::errc::operation_would_block)
+	{
+		link_lost("rx connection failed");
 	}
 	return recv;
+}
+
+void m2comm_device::link_lost(const char *why)
+{
+	osd_printf_verbose("M2COMM: %s\n", why);
+	if (m_linkalive == 0x01)
+		m_linkalive = 0x02;
+	m_linktimer = 0x00;
+
+	// close both lines: the other end sees the link go down too, and a new
+	// link (after the game resets the board) starts on fresh connections
+	m_line_rx.reset();
+	m_line_tx.reset();
 }
 
 void m2comm_device::send_data(uint8_t frameType, int frameStart, int frameSize, int dataSize)
@@ -692,14 +717,6 @@ void m2comm_device::send_frame(int dataSize){
 
 	filerr = m_line_tx->write(&m_buffer0, 0, dataSize, written);
 	if (filerr)
-	{
-		if (m_linkalive == 0x01)
-		{
-			osd_printf_verbose("M2COMM: tx connection lost\n");
-			m_linkalive = 0x02;
-			m_linktimer = 0x00;
-			m_line_tx.reset();
-		}
-	}
+		link_lost("tx connection lost");
 }
 #endif

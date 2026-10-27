@@ -114,8 +114,12 @@ public:
 	{
 		if (!m_listening)
 		{
-			// connected socket
+			// connected socket - if the peer has gone, fail with EPIPE rather than raise SIGPIPE
+#if defined(MSG_NOSIGNAL)
+			ssize_t const result = ::send(m_sock, buffer, count, MSG_NOSIGNAL);
+#else
 			ssize_t const result = ::write(m_sock, buffer, count);
+#endif
 			if (result < 0)
 				return std::error_condition(errno, std::generic_category());
 
@@ -241,7 +245,11 @@ std::error_condition posix_open_socket(std::string const &path, std::uint32_t op
 
 	int const flag = 1;
 	if ((::setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char *>(&flag), sizeof(flag)) < 0) ||
-		(::setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char *>(&flag), sizeof(flag)) < 0))
+		(::setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char *>(&flag), sizeof(flag)) < 0)
+#if !defined(MSG_NOSIGNAL) && defined(SO_NOSIGPIPE)
+		|| (::setsockopt(sock, SOL_SOCKET, SO_NOSIGPIPE, reinterpret_cast<const char *>(&flag), sizeof(flag)) < 0)
+#endif
+		)
 	{
 		std::error_condition sockopterr(errno, std::generic_category());
 		::close(sock);
