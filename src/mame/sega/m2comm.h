@@ -72,10 +72,12 @@ private:
 	uint8_t m_linkid = 0;
 	uint8_t m_linkcount = 0;
 	uint8_t m_zfg_delay = 0;
+	bool m_rx_accepted = false;
 
 	void comm_tick();
 	void read_fg();
 	int read_frame(int dataSize);
+	void link_lost(const char *why);
 	void send_data(uint8_t frameType, int frameStart, int frameSize, int dataSize);
 	void send_frame(int dataSize);
 #endif
